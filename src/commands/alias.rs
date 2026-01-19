@@ -17,6 +17,10 @@ pub enum AliasCommand {
         #[arg(long, requires = "api")]
         token: Option<String>,
 
+        /// Accept invalid TLS certificates (for dev environments)
+        #[arg(long, requires = "api")]
+        insecure: bool,
+
         /// Database URL (for DB backend)
         #[arg(long, conflicts_with = "api")]
         db: Option<String>,
@@ -51,9 +55,10 @@ impl AliasCommand {
                 name,
                 api,
                 token,
+                insecure,
                 db,
                 force,
-            } => cmd_set(name, api, token, db, force),
+            } => cmd_set(name, api, token, insecure, db, force),
             Self::List => cmd_list(),
             Self::Remove { name } => cmd_remove(name),
             Self::SetDefault { name } => cmd_set_default(name),
@@ -65,13 +70,14 @@ fn cmd_set(
     name: String,
     api: Option<String>,
     token: Option<String>,
+    insecure: bool,
     db: Option<String>,
     force: bool,
 ) -> Result<(), ConfigError> {
     let mut config = Config::load()?;
 
     let alias_config = match (api, db) {
-        (Some(url), None) => AliasConfig::api(url, token),
+        (Some(url), None) => AliasConfig::api(url, token, insecure),
         (None, Some(database_url)) => AliasConfig::db(database_url),
         _ => {
             eprintln!(
@@ -126,7 +132,7 @@ fn cmd_list() -> Result<(), ConfigError> {
         };
 
         let (type_str, detail) = match alias {
-            AliasConfig::Api { url, token } => {
+            AliasConfig::Api { url, token, .. } => {
                 let auth = if token.is_some() { " (auth)" } else { "" };
                 ("api".cyan(), format!("{}{}", url, auth.dimmed()))
             }

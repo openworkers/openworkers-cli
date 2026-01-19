@@ -32,6 +32,8 @@ pub enum AliasConfig {
         url: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        insecure: bool,
     },
     Db {
         database_url: String,
@@ -39,10 +41,11 @@ pub enum AliasConfig {
 }
 
 impl AliasConfig {
-    pub fn api(url: impl Into<String>, token: Option<String>) -> Self {
+    pub fn api(url: impl Into<String>, token: Option<String>, insecure: bool) -> Self {
         Self::Api {
             url: url.into(),
             token,
+            insecure,
         }
     }
 
@@ -71,7 +74,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let mut aliases = HashMap::new();
-        aliases.insert("cloud".to_string(), AliasConfig::api(DEFAULT_API_URL, None));
+        aliases.insert(
+            "cloud".to_string(),
+            AliasConfig::api(DEFAULT_API_URL, None, false),
+        );
 
         Self {
             version: 1,
@@ -163,13 +169,23 @@ mod tests {
 
     #[test]
     fn test_alias_config_api() {
-        let alias = AliasConfig::api("https://example.com/api", Some("token123".to_string()));
+        let alias = AliasConfig::api(
+            "https://example.com/api",
+            Some("token123".to_string()),
+            false,
+        );
 
         assert_eq!(alias.type_name(), "api");
 
-        if let AliasConfig::Api { url, token } = alias {
+        if let AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } = alias
+        {
             assert_eq!(url, "https://example.com/api");
             assert_eq!(token, Some("token123".to_string()));
+            assert!(!insecure);
         } else {
             panic!("Expected Api variant");
         }
@@ -177,11 +193,22 @@ mod tests {
 
     #[test]
     fn test_alias_config_api_no_token() {
-        let alias = AliasConfig::api("https://example.com/api", None);
+        let alias = AliasConfig::api("https://example.com/api", None, false);
 
-        if let AliasConfig::Api { url, token } = alias {
+        if let AliasConfig::Api { url, token, .. } = alias {
             assert_eq!(url, "https://example.com/api");
             assert!(token.is_none());
+        } else {
+            panic!("Expected Api variant");
+        }
+    }
+
+    #[test]
+    fn test_alias_config_api_insecure() {
+        let alias = AliasConfig::api("https://dev.localhost/api", None, true);
+
+        if let AliasConfig::Api { insecure, .. } = alias {
+            assert!(insecure);
         } else {
             panic!("Expected Api variant");
         }
@@ -211,7 +238,7 @@ mod tests {
         let cloud = config.aliases.get("cloud").unwrap();
         assert_eq!(cloud.type_name(), "api");
 
-        if let AliasConfig::Api { url, token } = cloud {
+        if let AliasConfig::Api { url, token, .. } = cloud {
             assert_eq!(url, DEFAULT_API_URL);
             assert!(token.is_none());
         }
@@ -231,7 +258,7 @@ mod tests {
 
         let result = config.set_alias(
             "prod",
-            AliasConfig::api("https://prod.example.com", None),
+            AliasConfig::api("https://prod.example.com", None, false),
             false,
         );
 
@@ -243,7 +270,11 @@ mod tests {
     fn test_set_alias_exists_no_force() {
         let mut config = Config::default();
 
-        let result = config.set_alias("cloud", AliasConfig::api("https://other.com", None), false);
+        let result = config.set_alias(
+            "cloud",
+            AliasConfig::api("https://other.com", None, false),
+            false,
+        );
 
         assert!(matches!(result, Err(ConfigError::AliasExists(_))));
     }
@@ -253,7 +284,7 @@ mod tests {
         let mut config = Config::default();
         let new_url = "https://new.example.com";
 
-        let result = config.set_alias("cloud", AliasConfig::api(new_url, None), true);
+        let result = config.set_alias("cloud", AliasConfig::api(new_url, None, false), true);
 
         assert!(result.is_ok());
 
@@ -301,7 +332,7 @@ mod tests {
         config
             .set_alias(
                 "prod",
-                AliasConfig::api("https://prod.example.com", None),
+                AliasConfig::api("https://prod.example.com", None, false),
                 false,
             )
             .unwrap();
@@ -323,14 +354,18 @@ mod tests {
 
     #[test]
     fn test_json_serialization_api() {
-        let alias = AliasConfig::api("https://example.com/api", Some("token123".to_string()));
+        let alias = AliasConfig::api(
+            "https://example.com/api",
+            Some("token123".to_string()),
+            false,
+        );
 
         let json = serde_json::to_string(&alias).unwrap();
         let parsed: AliasConfig = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.type_name(), "api");
 
-        if let AliasConfig::Api { url, token } = parsed {
+        if let AliasConfig::Api { url, token, .. } = parsed {
             assert_eq!(url, "https://example.com/api");
             assert_eq!(token, Some("token123".to_string()));
         }
@@ -368,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_json_api_without_token_skips_field() {
-        let alias = AliasConfig::api("https://example.com", None);
+        let alias = AliasConfig::api("https://example.com", None, false);
 
         let json = serde_json::to_string(&alias).unwrap();
 

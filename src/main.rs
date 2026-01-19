@@ -112,8 +112,12 @@ async fn run_workers_command(alias: Option<String>, command: WorkersCommand) -> 
             command.run(&backend).await.map_err(format_backend_error)
         }
 
-        AliasConfig::Api { url, token } => {
-            let backend = ApiBackend::new(url, token);
+        AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } => {
+            let backend = ApiBackend::new(url, token, insecure);
             command.run(&backend).await.map_err(format_backend_error)
         }
     }

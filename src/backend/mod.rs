@@ -27,9 +27,11 @@ pub enum BackendError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Worker {
     pub id: String,
     pub name: String,
+    #[serde(alias = "desc")]
     pub description: Option<String>,
     pub current_version: Option<i32>,
     pub created_at: DateTime<Utc>,
@@ -37,12 +39,16 @@ pub struct Worker {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateWorkerInput {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub worker_id: String,
     pub version: i32,
@@ -53,9 +59,11 @@ pub struct Deployment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeployInput {
     pub code: Vec<u8>,
     pub code_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 

@@ -89,6 +89,8 @@ impl Backend for DbBackend {
         .fetch_one(&self.pool)
         .await?;
 
+        // Note: language is used by API to set initial deployment, DB backend ignores it for now
+
         Ok(Worker {
             id: row.get::<uuid::Uuid, _>("id").to_string(),
             name: row.get("name"),

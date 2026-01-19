@@ -23,6 +23,10 @@ pub enum WorkersCommand {
         /// Worker description
         #[arg(short, long)]
         description: Option<String>,
+
+        /// Language (javascript or typescript)
+        #[arg(short, long, default_value = "typescript")]
+        language: String,
     },
 
     /// Delete a worker
@@ -51,7 +55,11 @@ impl WorkersCommand {
         match self {
             Self::List => cmd_list(backend).await,
             Self::Get { name } => cmd_get(backend, &name).await,
-            Self::Create { name, description } => cmd_create(backend, name, description).await,
+            Self::Create {
+                name,
+                description,
+                language,
+            } => cmd_create(backend, name, description, language).await,
             Self::Delete { name } => cmd_delete(backend, &name).await,
             Self::Deploy {
                 name,
@@ -102,8 +110,13 @@ async fn cmd_create<B: Backend>(
     backend: &B,
     name: String,
     description: Option<String>,
+    language: String,
 ) -> Result<(), BackendError> {
-    let input = CreateWorkerInput { name, description };
+    let input = CreateWorkerInput {
+        name,
+        description,
+        language,
+    };
     let worker = backend.create_worker(input).await?;
 
     println!(
@@ -271,6 +284,7 @@ mod tests {
         let result = WorkersCommand::Create {
             name: "new-worker".to_string(),
             description: Some("A new worker".to_string()),
+            language: "typescript".to_string(),
         }
         .run(&backend)
         .await;
@@ -290,6 +304,7 @@ mod tests {
         let result = WorkersCommand::Create {
             name: "simple-worker".to_string(),
             description: None,
+            language: "javascript".to_string(),
         }
         .run(&backend)
         .await;

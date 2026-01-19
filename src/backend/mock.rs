@@ -82,6 +82,7 @@ impl Backend for MockBackend {
             )));
         }
 
+        // Note: language is used by API to set initial deployment, mock ignores it
         let worker = Worker {
             id: uuid::Uuid::new_v4().to_string(),
             name: input.name.clone(),

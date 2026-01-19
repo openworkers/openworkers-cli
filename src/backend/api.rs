@@ -8,9 +8,14 @@ pub struct ApiBackend {
 }
 
 impl ApiBackend {
-    pub fn new(base_url: String, token: Option<String>) -> Self {
+    pub fn new(base_url: String, token: Option<String>, insecure: bool) -> Self {
+        let client = Client::builder()
+            .danger_accept_invalid_certs(insecure)
+            .build()
+            .expect("Failed to build HTTP client");
+
         Self {
-            client: Client::new(),
+            client,
             base_url,
             token,
         }
