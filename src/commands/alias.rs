@@ -1,0 +1,213 @@
+use crate::config::{AliasConfig, Config, ConfigError};
+use clap::Subcommand;
+use colored::Colorize;
+
+#[derive(Subcommand)]
+pub enum AliasCommand {
+    /// Add or update an alias
+    Set {
+        /// Alias name
+        name: String,
+
+        /// API URL (for API backend)
+        #[arg(long, conflicts_with = "db")]
+        api: Option<String>,
+
+        /// API token
+        #[arg(long, requires = "api")]
+        token: Option<String>,
+
+        /// Database URL (for DB backend)
+        #[arg(long, conflicts_with = "api")]
+        db: Option<String>,
+
+        /// Overwrite existing alias
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// List all configured aliases
+    #[command(alias = "ls")]
+    List,
+
+    /// Remove an alias
+    #[command(alias = "rm")]
+    Remove {
+        /// Alias name to remove
+        name: String,
+    },
+
+    /// Set the default alias
+    SetDefault {
+        /// Alias name to set as default
+        name: String,
+    },
+}
+
+impl AliasCommand {
+    pub fn run(self) -> Result<(), ConfigError> {
+        match self {
+            Self::Set {
+                name,
+                api,
+                token,
+                db,
+                force,
+            } => cmd_set(name, api, token, db, force),
+            Self::List => cmd_list(),
+            Self::Remove { name } => cmd_remove(name),
+            Self::SetDefault { name } => cmd_set_default(name),
+        }
+    }
+}
+
+fn cmd_set(
+    name: String,
+    api: Option<String>,
+    token: Option<String>,
+    db: Option<String>,
+    force: bool,
+) -> Result<(), ConfigError> {
+    let mut config = Config::load()?;
+
+    let alias_config = match (api, db) {
+        (Some(url), None) => AliasConfig::api(url, token),
+        (None, Some(database_url)) => AliasConfig::db(database_url),
+        _ => {
+            eprintln!(
+                "{} Either --api or --db must be specified",
+                "error:".red().bold()
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let is_update = config.aliases.contains_key(&name);
+    config.set_alias(&name, alias_config.clone(), force)?;
+    config.save()?;
+
+    let action = if is_update { "Updated" } else { "Added" };
+    let type_name = alias_config.type_name();
+
+    println!(
+        "{} {} alias '{}' ({})",
+        action,
+        type_name.cyan(),
+        name.green().bold(),
+        match alias_config {
+            AliasConfig::Api { url, .. } => url,
+            AliasConfig::Db { database_url } => mask_password(&database_url),
+        }
+    );
+
+    Ok(())
+}
+
+fn cmd_list() -> Result<(), ConfigError> {
+    let config = Config::load()?;
+
+    if config.aliases.is_empty() {
+        println!("No aliases configured.");
+        println!(
+            "Run '{}' to add one.",
+            "ow alias set <name> --api <url>".cyan()
+        );
+        return Ok(());
+    }
+
+    let default = config.default.as_deref();
+
+    for (name, alias) in &config.aliases {
+        let is_default = default == Some(name.as_str());
+        let marker = if is_default {
+            "*".green().bold().to_string()
+        } else {
+            " ".to_string()
+        };
+
+        let (type_str, detail) = match alias {
+            AliasConfig::Api { url, token } => {
+                let auth = if token.is_some() { " (auth)" } else { "" };
+                ("api".cyan(), format!("{}{}", url, auth.dimmed()))
+            }
+            AliasConfig::Db { database_url } => ("db".yellow(), mask_password(database_url)),
+        };
+
+        println!(
+            "{} {:12} {:4} {}",
+            marker,
+            name.bold(),
+            type_str,
+            detail.dimmed()
+        );
+    }
+
+    if default.is_some() {
+        println!();
+        println!("{}", "* = default".dimmed());
+    }
+
+    Ok(())
+}
+
+fn cmd_remove(name: String) -> Result<(), ConfigError> {
+    let mut config = Config::load()?;
+
+    config.remove_alias(&name)?;
+    config.save()?;
+
+    println!("Removed alias '{}'", name.red().bold());
+
+    Ok(())
+}
+
+fn cmd_set_default(name: String) -> Result<(), ConfigError> {
+    let mut config = Config::load()?;
+
+    config.set_default(&name)?;
+    config.save()?;
+
+    println!("Default alias set to '{}'", name.green().bold());
+
+    Ok(())
+}
+
+/// Mask password in database URL for display
+fn mask_password(url: &str) -> String {
+    // postgres://user:password@host/db -> postgres://user:***@host/db
+    if let Some(at_pos) = url.find('@') {
+        if let Some(colon_pos) = url[..at_pos].rfind(':') {
+            if let Some(slash_pos) = url[..colon_pos].rfind('/') {
+                let prefix = &url[..=slash_pos];
+                let user_end = url[slash_pos + 1..].find(':').map(|p| slash_pos + 1 + p);
+
+                if let Some(user_end) = user_end {
+                    let user = &url[slash_pos + 1..user_end];
+                    let suffix = &url[at_pos..];
+                    return format!("{}{}:***{}", prefix, user, suffix);
+                }
+            }
+        }
+    }
+
+    url.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mask_password() {
+        assert_eq!(
+            mask_password("postgres://user:secret@host/db"),
+            "postgres://user:***@host/db"
+        );
+        assert_eq!(
+            mask_password("postgres://admin:p@ssw0rd@localhost:5432/openworkers"),
+            "postgres://admin:***@localhost:5432/openworkers"
+        );
+        // No password
+        assert_eq!(mask_password("postgres://host/db"), "postgres://host/db");
+    }
+}
