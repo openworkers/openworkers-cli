@@ -75,13 +75,13 @@ impl Default for Config {
     fn default() -> Self {
         let mut aliases = HashMap::new();
         aliases.insert(
-            "cloud".to_string(),
+            "default".to_string(),
             AliasConfig::api(DEFAULT_API_URL, None, false),
         );
 
         Self {
             version: 1,
-            default: Some("cloud".to_string()),
+            default: Some("default".to_string()),
             aliases,
         }
     }
@@ -232,13 +232,13 @@ mod tests {
         let config = Config::default();
 
         assert_eq!(config.version, 1);
-        assert_eq!(config.default, Some("cloud".to_string()));
-        assert!(config.aliases.contains_key("cloud"));
+        assert_eq!(config.default, Some("default".to_string()));
+        assert!(config.aliases.contains_key("default"));
 
-        let cloud = config.aliases.get("cloud").unwrap();
-        assert_eq!(cloud.type_name(), "api");
+        let default = config.aliases.get("default").unwrap();
+        assert_eq!(default.type_name(), "api");
 
-        if let AliasConfig::Api { url, token, .. } = cloud {
+        if let AliasConfig::Api { url, token, .. } = default {
             assert_eq!(url, DEFAULT_API_URL);
             assert!(token.is_none());
         }
@@ -248,7 +248,7 @@ mod tests {
     fn test_get_alias() {
         let config = Config::default();
 
-        assert!(config.get_alias("cloud").is_some());
+        assert!(config.get_alias("default").is_some());
         assert!(config.get_alias("nonexistent").is_none());
     }
 
@@ -271,7 +271,7 @@ mod tests {
         let mut config = Config::default();
 
         let result = config.set_alias(
-            "cloud",
+            "default",
             AliasConfig::api("https://other.com", None, false),
             false,
         );
@@ -284,11 +284,11 @@ mod tests {
         let mut config = Config::default();
         let new_url = "https://new.example.com";
 
-        let result = config.set_alias("cloud", AliasConfig::api(new_url, None, false), true);
+        let result = config.set_alias("default", AliasConfig::api(new_url, None, false), true);
 
         assert!(result.is_ok());
 
-        if let AliasConfig::Api { url, .. } = config.aliases.get("cloud").unwrap() {
+        if let AliasConfig::Api { url, .. } = config.aliases.get("default").unwrap() {
             assert_eq!(url, new_url);
         }
     }
@@ -319,9 +319,9 @@ mod tests {
     fn test_remove_alias_clears_default() {
         let mut config = Config::default();
 
-        assert_eq!(config.default, Some("cloud".to_string()));
+        assert_eq!(config.default, Some("default".to_string()));
 
-        config.remove_alias("cloud").unwrap();
+        config.remove_alias("default").unwrap();
 
         assert!(config.default.is_none());
     }
@@ -396,8 +396,8 @@ mod tests {
         let parsed: Config = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.version, 1);
-        assert_eq!(parsed.default, Some("cloud".to_string()));
-        assert!(parsed.aliases.contains_key("cloud"));
+        assert_eq!(parsed.default, Some("default".to_string()));
+        assert!(parsed.aliases.contains_key("default"));
         assert!(parsed.aliases.contains_key("infra"));
     }
 

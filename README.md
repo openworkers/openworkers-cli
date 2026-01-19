@@ -39,7 +39,7 @@ ow alias rm old-alias
 
 ### Default Alias
 
-On first run, a `cloud` alias pointing to `https://dash.openworkers.com/api/v1` is created as default.
+On first run, a `default` alias pointing to `https://dash.openworkers.com/api/v1` is created as default.
 
 ## Commands
 
