@@ -4,6 +4,8 @@
 -- Converts database_configs.provider from VARCHAR to ENUM for type safety
 --
 
+BEGIN;
+
 -- ============================================================================
 -- ENUM: Database provider
 -- ============================================================================
@@ -39,3 +41,5 @@ ALTER TABLE database_configs DROP COLUMN provider_old;
 -- ============================================================================
 
 COMMENT ON COLUMN database_configs.provider IS 'Database provider: platform (shared multi-tenant) or postgres (external connection)';
+
+COMMIT;

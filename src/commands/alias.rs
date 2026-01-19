@@ -175,17 +175,20 @@ fn cmd_set_default(name: String) -> Result<(), ConfigError> {
 /// Mask password in database URL for display
 fn mask_password(url: &str) -> String {
     // postgres://user:password@host/db -> postgres://user:***@host/db
-    if let Some(at_pos) = url.find('@') {
-        if let Some(colon_pos) = url[..at_pos].rfind(':') {
-            if let Some(slash_pos) = url[..colon_pos].rfind('/') {
-                let prefix = &url[..=slash_pos];
-                let user_end = url[slash_pos + 1..].find(':').map(|p| slash_pos + 1 + p);
+    // Use rfind to handle passwords containing @
+    if let Some(scheme_end) = url.find("://") {
+        let after_scheme = &url[scheme_end + 3..];
 
-                if let Some(user_end) = user_end {
-                    let user = &url[slash_pos + 1..user_end];
-                    let suffix = &url[at_pos..];
-                    return format!("{}{}:***{}", prefix, user, suffix);
-                }
+        // Find the last @ which separates credentials from host
+        if let Some(at_pos) = after_scheme.rfind('@') {
+            let credentials = &after_scheme[..at_pos];
+
+            // Find the first : which separates user from password
+            if let Some(colon_pos) = credentials.find(':') {
+                let user = &credentials[..colon_pos];
+                let host_and_rest = &after_scheme[at_pos..];
+
+                return format!("{}://{}:***{}", &url[..scheme_end], user, host_and_rest);
             }
         }
     }

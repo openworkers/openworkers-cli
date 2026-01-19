@@ -1,6 +1,9 @@
 pub mod api;
 pub mod db;
 
+#[cfg(test)]
+pub mod mock;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

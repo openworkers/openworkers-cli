@@ -5,6 +5,8 @@
 -- Flow: Register email -> Click link -> Set password (validates email implicitly)
 --
 
+BEGIN;
+
 -- ============================================================================
 -- USER TABLE CHANGES
 -- ============================================================================
@@ -60,3 +62,5 @@ CREATE TRIGGER trg_cleanup_expired_tokens
 COMMENT ON COLUMN users.password_hash IS 'PBKDF2 hash for email-based authentication. NULL for OAuth-only users or pending registration.';
 COMMENT ON TABLE auth_tokens IS 'Temporary tokens for set-password (registration) and password reset flows.';
 COMMENT ON COLUMN auth_tokens.type IS 'Token type: set_password (24h expiry, registration) or password_reset (1h expiry).';
+
+COMMIT;

@@ -2,6 +2,8 @@
 -- OpenWorkers Database Schema - Initial Schema
 --
 
+BEGIN;
+
 SET client_encoding = 'UTF8';
 
 -- ============================================================================
@@ -153,3 +155,5 @@ CREATE TRIGGER cron_update
     AFTER INSERT OR DELETE OR UPDATE ON crons
     FOR EACH ROW
     EXECUTE FUNCTION cron_update();
+
+COMMIT;

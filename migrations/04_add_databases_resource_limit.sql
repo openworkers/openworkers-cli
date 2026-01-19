@@ -2,6 +2,8 @@
 -- OpenWorkers Database Schema - Add databases to resource_limits
 --
 
+BEGIN;
+
 -- Update default for resource_limits column
 ALTER TABLE users
 ALTER COLUMN resource_limits SET DEFAULT '{"workers": 5, "environments": 5, "databases": 3}'::jsonb;
@@ -10,3 +12,5 @@ ALTER COLUMN resource_limits SET DEFAULT '{"workers": 5, "environments": 5, "dat
 UPDATE users
 SET resource_limits = resource_limits || '{"databases": 3}'::jsonb
 WHERE NOT resource_limits ? 'databases';
+
+COMMIT;

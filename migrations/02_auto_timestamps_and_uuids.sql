@@ -7,6 +7,8 @@
 -- 3. Auto-updated updated_at timestamps via trigger function
 --
 
+BEGIN;
+
 -- ============================================================================
 -- FUNCTION: Auto update updated_at
 -- ============================================================================
@@ -105,3 +107,5 @@ CREATE TRIGGER update_crons_updated_at_trigger
     BEFORE UPDATE ON crons
     FOR EACH ROW
     EXECUTE FUNCTION auto_updated_at();
+
+COMMIT;

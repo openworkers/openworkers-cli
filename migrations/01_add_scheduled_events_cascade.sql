@@ -6,6 +6,8 @@
 -- when their parent worker is deleted.
 --
 
+BEGIN;
+
 -- Drop the existing constraint
 ALTER TABLE scheduled_events
     DROP CONSTRAINT IF EXISTS scheduled_events_worker_id_fkey;
@@ -17,3 +19,5 @@ ALTER TABLE scheduled_events
     REFERENCES workers(id)
     ON UPDATE CASCADE
     ON DELETE CASCADE;
+
+COMMIT;

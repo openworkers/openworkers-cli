@@ -5,6 +5,8 @@
 -- The binding value references workers.id directly (no config table needed)
 --
 
+BEGIN;
+
 -- ============================================================================
 -- UPDATE CONSTRAINT: Add 'worker' to environment_values check
 -- ============================================================================
@@ -24,3 +26,5 @@ ADD CONSTRAINT check_binding_value CHECK (
 -- ============================================================================
 
 COMMENT ON TYPE enum_binding_type IS 'Binding types: var, secret, assets, storage, kv, database, worker';
+
+COMMIT;

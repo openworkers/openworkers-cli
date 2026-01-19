@@ -120,12 +120,6 @@ impl Config {
         self.aliases.get(name)
     }
 
-    pub fn get_default_alias(&self) -> Option<(&String, &AliasConfig)> {
-        self.default
-            .as_ref()
-            .and_then(|name| self.aliases.get(name).map(|config| (name, config)))
-    }
-
     pub fn set_alias(
         &mut self,
         name: impl Into<String>,
@@ -160,5 +154,224 @@ impl Config {
 
         self.default = Some(name.to_string());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_alias_config_api() {
+        let alias = AliasConfig::api("https://example.com/api", Some("token123".to_string()));
+
+        assert_eq!(alias.type_name(), "api");
+
+        if let AliasConfig::Api { url, token } = alias {
+            assert_eq!(url, "https://example.com/api");
+            assert_eq!(token, Some("token123".to_string()));
+        } else {
+            panic!("Expected Api variant");
+        }
+    }
+
+    #[test]
+    fn test_alias_config_api_no_token() {
+        let alias = AliasConfig::api("https://example.com/api", None);
+
+        if let AliasConfig::Api { url, token } = alias {
+            assert_eq!(url, "https://example.com/api");
+            assert!(token.is_none());
+        } else {
+            panic!("Expected Api variant");
+        }
+    }
+
+    #[test]
+    fn test_alias_config_db() {
+        let alias = AliasConfig::db("postgres://user:pass@localhost/db");
+
+        assert_eq!(alias.type_name(), "db");
+
+        if let AliasConfig::Db { database_url } = alias {
+            assert_eq!(database_url, "postgres://user:pass@localhost/db");
+        } else {
+            panic!("Expected Db variant");
+        }
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+
+        assert_eq!(config.version, 1);
+        assert_eq!(config.default, Some("cloud".to_string()));
+        assert!(config.aliases.contains_key("cloud"));
+
+        let cloud = config.aliases.get("cloud").unwrap();
+        assert_eq!(cloud.type_name(), "api");
+
+        if let AliasConfig::Api { url, token } = cloud {
+            assert_eq!(url, DEFAULT_API_URL);
+            assert!(token.is_none());
+        }
+    }
+
+    #[test]
+    fn test_get_alias() {
+        let config = Config::default();
+
+        assert!(config.get_alias("cloud").is_some());
+        assert!(config.get_alias("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_set_alias_new() {
+        let mut config = Config::default();
+
+        let result = config.set_alias(
+            "prod",
+            AliasConfig::api("https://prod.example.com", None),
+            false,
+        );
+
+        assert!(result.is_ok());
+        assert!(config.aliases.contains_key("prod"));
+    }
+
+    #[test]
+    fn test_set_alias_exists_no_force() {
+        let mut config = Config::default();
+
+        let result = config.set_alias("cloud", AliasConfig::api("https://other.com", None), false);
+
+        assert!(matches!(result, Err(ConfigError::AliasExists(_))));
+    }
+
+    #[test]
+    fn test_set_alias_exists_with_force() {
+        let mut config = Config::default();
+        let new_url = "https://new.example.com";
+
+        let result = config.set_alias("cloud", AliasConfig::api(new_url, None), true);
+
+        assert!(result.is_ok());
+
+        if let AliasConfig::Api { url, .. } = config.aliases.get("cloud").unwrap() {
+            assert_eq!(url, new_url);
+        }
+    }
+
+    #[test]
+    fn test_remove_alias() {
+        let mut config = Config::default();
+        config
+            .set_alias("test", AliasConfig::db("postgres://localhost/test"), false)
+            .unwrap();
+
+        let removed = config.remove_alias("test").unwrap();
+
+        assert_eq!(removed.type_name(), "db");
+        assert!(!config.aliases.contains_key("test"));
+    }
+
+    #[test]
+    fn test_remove_alias_not_found() {
+        let mut config = Config::default();
+
+        let result = config.remove_alias("nonexistent");
+
+        assert!(matches!(result, Err(ConfigError::AliasNotFound(_))));
+    }
+
+    #[test]
+    fn test_remove_alias_clears_default() {
+        let mut config = Config::default();
+
+        assert_eq!(config.default, Some("cloud".to_string()));
+
+        config.remove_alias("cloud").unwrap();
+
+        assert!(config.default.is_none());
+    }
+
+    #[test]
+    fn test_set_default() {
+        let mut config = Config::default();
+        config
+            .set_alias(
+                "prod",
+                AliasConfig::api("https://prod.example.com", None),
+                false,
+            )
+            .unwrap();
+
+        let result = config.set_default("prod");
+
+        assert!(result.is_ok());
+        assert_eq!(config.default, Some("prod".to_string()));
+    }
+
+    #[test]
+    fn test_set_default_not_found() {
+        let mut config = Config::default();
+
+        let result = config.set_default("nonexistent");
+
+        assert!(matches!(result, Err(ConfigError::AliasNotFound(_))));
+    }
+
+    #[test]
+    fn test_json_serialization_api() {
+        let alias = AliasConfig::api("https://example.com/api", Some("token123".to_string()));
+
+        let json = serde_json::to_string(&alias).unwrap();
+        let parsed: AliasConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.type_name(), "api");
+
+        if let AliasConfig::Api { url, token } = parsed {
+            assert_eq!(url, "https://example.com/api");
+            assert_eq!(token, Some("token123".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_json_serialization_db() {
+        let alias = AliasConfig::db("postgres://localhost/db");
+
+        let json = serde_json::to_string(&alias).unwrap();
+        let parsed: AliasConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.type_name(), "db");
+
+        if let AliasConfig::Db { database_url } = parsed {
+            assert_eq!(database_url, "postgres://localhost/db");
+        }
+    }
+
+    #[test]
+    fn test_json_serialization_config() {
+        let mut config = Config::default();
+        config
+            .set_alias("infra", AliasConfig::db("postgres://localhost/db"), false)
+            .unwrap();
+
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.default, Some("cloud".to_string()));
+        assert!(parsed.aliases.contains_key("cloud"));
+        assert!(parsed.aliases.contains_key("infra"));
+    }
+
+    #[test]
+    fn test_json_api_without_token_skips_field() {
+        let alias = AliasConfig::api("https://example.com", None);
+
+        let json = serde_json::to_string(&alias).unwrap();
+
+        assert!(!json.contains("token"));
     }
 }

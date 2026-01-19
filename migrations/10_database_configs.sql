@@ -6,6 +6,8 @@
 --   - postgres: direct connection (can be Supabase, PlanetScale, Neon, etc.)
 --
 
+BEGIN;
+
 -- ============================================================================
 -- TABLE: database_configs
 -- ============================================================================
@@ -350,3 +352,5 @@ COMMENT ON COLUMN database_configs.max_rows IS 'Maximum rows returned per query'
 COMMENT ON COLUMN database_configs.timeout_seconds IS 'Query timeout in seconds';
 
 COMMENT ON COLUMN environment_values.value IS 'For var/secret: the value. For bindings: UUID of config table (storage_configs, kv_configs, database_configs)';
+
+COMMIT;

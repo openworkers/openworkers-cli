@@ -210,3 +210,260 @@ async fn cmd_deploy<B: Backend>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::mock::MockBackend;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn test_list_empty() {
+        let backend = MockBackend::new();
+
+        let result = WorkersCommand::List.run(&backend).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_with_workers() {
+        let backend = MockBackend::new()
+            .with_worker("api", Some("API worker"))
+            .with_deployed_worker("web", 3);
+
+        let result = WorkersCommand::List.run(&backend).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_existing() {
+        let backend = MockBackend::new().with_worker("my-worker", Some("Test worker"));
+
+        let result = WorkersCommand::Get {
+            name: "my-worker".to_string(),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_not_found() {
+        let backend = MockBackend::new();
+
+        let result = WorkersCommand::Get {
+            name: "nonexistent".to_string(),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(matches!(result, Err(BackendError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_create() {
+        let backend = MockBackend::new();
+
+        let result = WorkersCommand::Create {
+            name: "new-worker".to_string(),
+            description: Some("A new worker".to_string()),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+
+        // Verify the worker was created
+        let worker = backend.get_worker("new-worker").await.unwrap();
+        assert_eq!(worker.name, "new-worker");
+        assert_eq!(worker.description, Some("A new worker".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_without_description() {
+        let backend = MockBackend::new();
+
+        let result = WorkersCommand::Create {
+            name: "simple-worker".to_string(),
+            description: None,
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+
+        let worker = backend.get_worker("simple-worker").await.unwrap();
+        assert!(worker.description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_existing() {
+        let backend = MockBackend::new().with_worker("to-delete", None);
+
+        let result = WorkersCommand::Delete {
+            name: "to-delete".to_string(),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+
+        // Verify it's gone
+        let get_result = backend.get_worker("to-delete").await;
+        assert!(matches!(get_result, Err(BackendError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_delete_not_found() {
+        let backend = MockBackend::new();
+
+        let result = WorkersCommand::Delete {
+            name: "nonexistent".to_string(),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(matches!(result, Err(BackendError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_deploy_typescript() {
+        let backend = MockBackend::new().with_worker("ts-worker", None);
+
+        let mut temp_file = NamedTempFile::with_suffix(".ts").unwrap();
+        writeln!(
+            temp_file,
+            "export default {{ fetch() {{ return new Response('Hello') }} }}"
+        )
+        .unwrap();
+
+        let result = WorkersCommand::Deploy {
+            name: "ts-worker".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: Some("Initial deploy".to_string()),
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+
+        // Verify version was updated
+        let worker = backend.get_worker("ts-worker").await.unwrap();
+        assert_eq!(worker.current_version, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_deploy_javascript() {
+        let backend = MockBackend::new().with_worker("js-worker", None);
+
+        let mut temp_file = NamedTempFile::with_suffix(".js").unwrap();
+        writeln!(
+            temp_file,
+            "export default {{ fetch() {{ return new Response('Hello') }} }}"
+        )
+        .unwrap();
+
+        let result = WorkersCommand::Deploy {
+            name: "js-worker".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: None,
+        }
+        .run(&backend)
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_increments_version() {
+        let backend = MockBackend::new().with_worker("versioned-worker", None);
+
+        let mut temp_file = NamedTempFile::with_suffix(".ts").unwrap();
+        writeln!(
+            temp_file,
+            "export default {{ fetch() {{ return new Response('v1') }} }}"
+        )
+        .unwrap();
+
+        // First deploy
+        WorkersCommand::Deploy {
+            name: "versioned-worker".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: Some("v1".to_string()),
+        }
+        .run(&backend)
+        .await
+        .unwrap();
+
+        let worker = backend.get_worker("versioned-worker").await.unwrap();
+        assert_eq!(worker.current_version, Some(1));
+
+        // Second deploy
+        writeln!(temp_file, "// v2").unwrap();
+        WorkersCommand::Deploy {
+            name: "versioned-worker".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: Some("v2".to_string()),
+        }
+        .run(&backend)
+        .await
+        .unwrap();
+
+        let worker = backend.get_worker("versioned-worker").await.unwrap();
+        assert_eq!(worker.current_version, Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_deploy_invalid_extension() {
+        let backend = MockBackend::new().with_worker("worker", None);
+
+        let temp_file = NamedTempFile::with_suffix(".txt").unwrap();
+
+        let result = WorkersCommand::Deploy {
+            name: "worker".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: None,
+        }
+        .run(&backend)
+        .await;
+
+        assert!(matches!(result, Err(BackendError::Api(_))));
+    }
+
+    #[tokio::test]
+    async fn test_deploy_worker_not_found() {
+        let backend = MockBackend::new();
+
+        let mut temp_file = NamedTempFile::with_suffix(".ts").unwrap();
+        writeln!(temp_file, "export default {{}}").unwrap();
+
+        let result = WorkersCommand::Deploy {
+            name: "nonexistent".to_string(),
+            file: temp_file.path().to_path_buf(),
+            message: None,
+        }
+        .run(&backend)
+        .await;
+
+        assert!(matches!(result, Err(BackendError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_deploy_file_not_found() {
+        let backend = MockBackend::new().with_worker("worker", None);
+
+        let result = WorkersCommand::Deploy {
+            name: "worker".to_string(),
+            file: PathBuf::from("/nonexistent/path/file.ts"),
+            message: None,
+        }
+        .run(&backend)
+        .await;
+
+        assert!(matches!(result, Err(BackendError::Api(_))));
+    }
+}

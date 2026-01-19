@@ -8,6 +8,8 @@
 -- of the corresponding config table. No FK constraint, validated by CHECK.
 --
 
+BEGIN;
+
 -- ============================================================================
 -- ENUMS
 -- ============================================================================
@@ -122,3 +124,5 @@ COMMENT ON COLUMN storage_configs.public_url IS 'Optional CDN URL for public acc
 
 COMMENT ON COLUMN environment_values.type IS 'Binding type: var, secret, assets, storage, kv';
 COMMENT ON COLUMN environment_values.value IS 'For var/secret: the value. For bindings: UUID of config table';
+
+COMMIT;

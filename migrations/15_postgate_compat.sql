@@ -7,6 +7,8 @@
 --   3. Creates views so Postgate can work with OpenWorkers schema
 --
 
+BEGIN;
+
 -- ============================================================================
 -- TABLE: database_tokens
 -- ============================================================================
@@ -232,3 +234,5 @@ COMMENT ON TABLE database_tokens IS 'Authentication tokens for database access v
 COMMENT ON VIEW postgate_databases IS 'Compatibility view for Postgate - maps to database_configs';
 COMMENT ON VIEW postgate_tokens IS 'Compatibility view for Postgate - maps to database_tokens';
 COMMENT ON FUNCTION create_tenant_database IS 'Creates a tenant database (used by Postgate CLI)';
+
+COMMIT;

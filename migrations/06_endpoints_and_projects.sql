@@ -6,6 +6,8 @@
 -- and points to either a worker (direct dispatch) or a project (route matching).
 --
 
+BEGIN;
+
 -- ============================================================================
 -- ENUMS
 -- ============================================================================
@@ -85,3 +87,5 @@ CREATE INDEX idx_endpoints_type ON endpoints(type);
 CREATE INDEX idx_projects_user_id ON projects(user_id);
 CREATE INDEX idx_project_routes_project_id ON project_routes(project_id);
 CREATE INDEX idx_project_routes_priority ON project_routes(project_id, priority DESC);
+
+COMMIT;

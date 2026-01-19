@@ -5,6 +5,8 @@
 -- and adds new limits for kv and storage config bindings.
 --
 
+BEGIN;
+
 -- ============================================================================
 -- ADD NEW COLUMNS
 -- ============================================================================
@@ -42,3 +44,5 @@ COMMENT ON COLUMN users.limit_databases IS 'Max number of database bindings this
 COMMENT ON COLUMN users.limit_kv IS 'Max number of KV namespaces this user can create';
 COMMENT ON COLUMN users.limit_storage IS 'Max number of storage configs this user can create (used for both assets and storage bindings)';
 COMMENT ON COLUMN users.second_precision IS 'Whether user can use second-precision cron expressions';
+
+COMMIT;

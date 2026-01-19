@@ -3,6 +3,8 @@
 -- Links openworkers users to postgate databases
 --
 
+BEGIN;
+
 -- Databases (references to postgate)
 CREATE TABLE databases (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,3 +25,5 @@ CREATE TRIGGER update_databases_updated_at_trigger
     BEFORE UPDATE ON databases
     FOR EACH ROW
     EXECUTE FUNCTION auto_updated_at();
+
+COMMIT;
