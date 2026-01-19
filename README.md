@@ -21,17 +21,17 @@ The CLI uses aliases to connect to different backends. Config is stored in `~/.o
 
 ```bash
 # Add API alias
-ow alias set cloud --api https://dash.openworkers.com/api/v1 --token <token>
-ow alias set local --api http://localhost:3000 --token dev
+ow alias set prod --api https://dash.openworkers.com/api/v1 --token <token>
+ow alias set dev --api http://localhost:7000 --token <token>
 
-# Add DB alias
+# Add DB alias (for infrastructure operations)
 ow alias set infra --db postgres://user:pass@host/db
 
 # List aliases
 ow alias list
 
 # Set default
-ow alias set-default cloud
+ow alias set-default prod
 
 # Remove alias
 ow alias rm old-alias
@@ -42,6 +42,31 @@ ow alias rm old-alias
 On first run, a `cloud` alias pointing to `https://dash.openworkers.com/api/v1` is created as default.
 
 ## Commands
+
+### Workers
+
+```bash
+# List workers
+ow workers list
+ow workers ls
+
+# Create a worker
+ow workers create my-api -d "My API worker"
+ow workers create my-api --language javascript
+
+# Get worker details
+ow workers get my-api
+
+# Deploy code to a worker
+ow workers deploy my-api ./src/index.ts
+ow workers deploy my-api ./src/index.ts -m "Fix bug"
+
+# Delete a worker
+ow workers delete my-api
+ow workers rm my-api
+```
+
+Supported file types: `.js`, `.ts`, `.wasm`
 
 ### Database Operations
 
@@ -54,35 +79,9 @@ ow infra db migrate
 # Check migration status
 ow infra db status
 
-# Baseline existing database (mark all migrations as applied without running them)
+# Baseline existing database (mark all migrations as applied)
 ow infra db baseline
 ```
-
-### Workers
-
-Works with both `api` and `db` aliases.
-
-```bash
-# List workers
-ow workers list
-ow workers ls
-
-# Create a worker
-ow workers create my-api -d "My API worker"
-
-# Get worker details
-ow workers get my-api
-
-# Deploy code to a worker
-ow workers deploy my-api ./src/index.ts -m "Initial deploy"
-ow workers deploy my-api ./src/index.ts -m "Fix bug"  # v2, v3, ...
-
-# Delete a worker
-ow workers delete my-api
-ow workers rm my-api
-```
-
-Supported file types: `.js`, `.ts`, `.wasm`
 
 ### Using Aliases
 
@@ -90,22 +89,31 @@ Supported file types: `.js`, `.ts`, `.wasm`
 # Use default alias
 ow workers list
 
-# Use specific alias (mc-style, alias as first argument)
+# Use specific alias as first argument
 ow prod workers list
+ow dev workers get my-api
 ow infra db migrate
+
+# Or use --alias flag
+ow --alias prod workers list
 ```
 
-## Config File Format
+## Config File
 
 ```json
 {
   "version": 1,
-  "default": "cloud",
+  "default": "prod",
   "aliases": {
-    "cloud": {
+    "prod": {
       "type": "api",
       "url": "https://dash.openworkers.com/api/v1",
-      "token": "owk_xxx"
+      "token": "ow_xxx"
+    },
+    "dev": {
+      "type": "api",
+      "url": "http://localhost:7000",
+      "token": "ow_xxx"
     },
     "infra": {
       "type": "db",
@@ -118,10 +126,7 @@ ow infra db migrate
 ## Development
 
 ```bash
-# Build
 cargo build
-
-# Run
-cargo run -- alias list
-cargo run -- --alias infra db status
+cargo run -- workers list
+cargo run -- dev workers list
 ```
