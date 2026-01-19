@@ -58,15 +58,41 @@ ow infra db status
 ow infra db baseline
 ```
 
+### Workers
+
+Works with both `api` and `db` aliases.
+
+```bash
+# List workers
+ow workers list
+ow workers ls
+
+# Create a worker
+ow workers create my-api -d "My API worker"
+
+# Get worker details
+ow workers get my-api
+
+# Deploy code to a worker
+ow workers deploy my-api ./src/index.ts -m "Initial deploy"
+ow workers deploy my-api ./src/index.ts -m "Fix bug"  # v2, v3, ...
+
+# Delete a worker
+ow workers delete my-api
+ow workers rm my-api
+```
+
+Supported file types: `.js`, `.ts`, `.wasm`
+
 ### Using Aliases
 
 ```bash
 # Use default alias
-ow db status
+ow workers list
 
 # Use specific alias (mc-style, alias as first argument)
+ow prod workers list
 ow infra db migrate
-ow prod db status
 ```
 
 ## Config File Format
