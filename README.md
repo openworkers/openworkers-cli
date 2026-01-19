@@ -43,6 +43,16 @@ On first run, a `default` alias pointing to `https://dash.openworkers.com/api/v1
 
 ## Commands
 
+### Login
+
+```bash
+# Set token on default alias
+ow login
+
+# Set token on specific alias
+ow dev login
+```
+
 ### Workers
 
 ```bash

@@ -30,6 +30,9 @@ enum Commands {
         command: AliasCommand,
     },
 
+    /// Set API token for an alias
+    Login,
+
     /// Database operations (requires db alias)
     Db {
         #[command(subcommand)]
@@ -59,6 +62,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
 
     let known_commands = [
         "alias",
+        "login",
         "db",
         "workers",
         "help",
@@ -144,6 +148,13 @@ async fn main() {
 
     let result = match cli.command {
         Commands::Alias { command } => command.run().map_err(|e| e.to_string()),
+        Commands::Login => (|| {
+            let config = Config::load().map_err(|e| e.to_string())?;
+            let alias_name = alias
+                .or(config.default.clone())
+                .ok_or("No alias specified and no default configured".to_string())?;
+            commands::login::run(&alias_name).map_err(|e| e.to_string())
+        })(),
         Commands::Db { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Workers { command } => run_workers_command(alias, command).await,
     };
