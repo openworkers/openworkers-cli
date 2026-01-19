@@ -49,10 +49,13 @@ Requires a `db` type alias.
 
 ```bash
 # Run pending migrations
-ow --alias infra db migrate
+ow infra db migrate
 
 # Check migration status
-ow --alias infra db status
+ow infra db status
+
+# Baseline existing database (mark all migrations as applied without running them)
+ow infra db baseline
 ```
 
 ### Using Aliases
@@ -61,8 +64,9 @@ ow --alias infra db status
 # Use default alias
 ow db status
 
-# Use specific alias
-ow --alias infra db migrate
+# Use specific alias (mc-style, alias as first argument)
+ow infra db migrate
+ow prod db status
 ```
 
 ## Config File Format

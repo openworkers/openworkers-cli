@@ -32,6 +32,9 @@ pub enum DbCommand {
 
     /// Show migration status
     Status,
+
+    /// Mark all migrations as applied without running them (for existing databases)
+    Baseline,
 }
 
 impl DbCommand {
@@ -42,6 +45,7 @@ impl DbCommand {
         match self {
             Self::Migrate => cmd_migrate(&pool).await,
             Self::Status => cmd_status(&pool).await,
+            Self::Baseline => cmd_baseline(&pool).await,
         }
     }
 }
@@ -134,6 +138,66 @@ async fn cmd_status(pool: &PgPool) -> Result<(), DbError> {
             "ow db migrate".cyan()
         );
     }
+
+    Ok(())
+}
+
+async fn cmd_baseline(pool: &PgPool) -> Result<(), DbError> {
+    // Create _sqlx_migrations table if it doesn't exist
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+            version BIGINT PRIMARY KEY,
+            description TEXT NOT NULL,
+            installed_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+            success BOOLEAN NOT NULL,
+            checksum BYTEA NOT NULL,
+            execution_time BIGINT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Check if already baselined
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await?;
+
+    if count > 0 {
+        println!(
+            "{} Database already has {} migration(s) recorded.",
+            "Warning:".yellow().bold(),
+            count
+        );
+        println!("Use '{}' to check status.", "ow db status".cyan());
+        return Ok(());
+    }
+
+    println!("Marking all migrations as applied...\n");
+
+    for migration in MIGRATOR.iter() {
+        sqlx::query(
+            r#"
+            INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+            VALUES ($1, $2, true, $3, 0)
+            "#,
+        )
+        .bind(migration.version)
+        .bind(&*migration.description)
+        .bind(&migration.checksum[..])
+        .execute(pool)
+        .await?;
+
+        println!("  {} {}", "Baseline".blue(), migration.description);
+    }
+
+    // Drop old _migrations table if it exists
+    sqlx::query("DROP TABLE IF EXISTS _migrations")
+        .execute(pool)
+        .await?;
+
+    println!("\n{}", "Baseline complete.".green().bold());
 
     Ok(())
 }
