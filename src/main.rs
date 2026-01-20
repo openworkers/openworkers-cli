@@ -11,6 +11,7 @@ use backend::api::ApiBackend;
 use backend::db::DbBackend;
 use commands::alias::AliasCommand;
 use commands::db::DbCommand;
+use commands::env::EnvCommand;
 use commands::workers::WorkersCommand;
 use config::{AliasConfig, Config};
 
@@ -44,6 +45,12 @@ enum Commands {
         #[command(subcommand)]
         command: WorkersCommand,
     },
+
+    /// Manage environments (variables and secrets)
+    Env {
+        #[command(subcommand)]
+        command: EnvCommand,
+    },
 }
 
 /// Extract alias from args if first arg matches a known alias.
@@ -65,6 +72,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "login",
         "db",
         "workers",
+        "env",
         "help",
         "--help",
         "-h",
@@ -127,6 +135,32 @@ async fn run_workers_command(alias: Option<String>, command: WorkersCommand) -> 
     }
 }
 
+async fn run_env_command(alias: Option<String>, command: EnvCommand) -> Result<(), String> {
+    let alias_config = resolve_alias(alias)?;
+
+    match alias_config {
+        AliasConfig::Db { database_url } => {
+            let pool = PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let backend = DbBackend::new(pool);
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+
+        AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } => {
+            let backend = ApiBackend::new(url, token, insecure);
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+    }
+}
+
 fn format_backend_error(e: BackendError) -> String {
     match e {
         BackendError::NotFound(msg) => msg,
@@ -157,6 +191,7 @@ async fn main() {
         })(),
         Commands::Db { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Workers { command } => run_workers_command(alias, command).await,
+        Commands::Env { command } => run_env_command(alias, command).await,
     };
 
     if let Err(e) = result {

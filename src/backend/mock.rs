@@ -1,4 +1,7 @@
-use super::{Backend, BackendError, CreateWorkerInput, DeployInput, Deployment, Worker};
+use super::{
+    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
+    Environment, UpdateEnvironmentInput, Worker,
+};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -8,6 +11,7 @@ use std::sync::{Arc, Mutex};
 struct MockState {
     workers: HashMap<String, Worker>,
     deployments: HashMap<String, Vec<Deployment>>,
+    environments: HashMap<String, Environment>,
 }
 
 #[derive(Default, Clone)]
@@ -153,5 +157,81 @@ impl Backend for MockBackend {
             .push(deployment.clone());
 
         Ok(deployment)
+    }
+
+    async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
+        let state = self.state.lock().unwrap();
+        let mut environments: Vec<Environment> = state.environments.values().cloned().collect();
+        environments.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(environments)
+    }
+
+    async fn get_environment(&self, name: &str) -> Result<Environment, BackendError> {
+        let state = self.state.lock().unwrap();
+        state
+            .environments
+            .get(name)
+            .cloned()
+            .ok_or_else(|| BackendError::NotFound(format!("Environment '{}' not found", name)))
+    }
+
+    async fn create_environment(
+        &self,
+        input: CreateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        let mut state = self.state.lock().unwrap();
+
+        if state.environments.contains_key(&input.name) {
+            return Err(BackendError::Api(format!(
+                "Environment '{}' already exists",
+                input.name
+            )));
+        }
+
+        let environment = Environment {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name.clone(),
+            description: input.desc,
+            values: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        state.environments.insert(input.name, environment.clone());
+        Ok(environment)
+    }
+
+    async fn update_environment(
+        &self,
+        name: &str,
+        input: UpdateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        let mut state = self.state.lock().unwrap();
+
+        let environment = state
+            .environments
+            .get_mut(name)
+            .ok_or_else(|| BackendError::NotFound(format!("Environment '{}' not found", name)))?;
+
+        if let Some(new_name) = input.name {
+            environment.name = new_name;
+        }
+
+        environment.updated_at = Utc::now();
+
+        Ok(environment.clone())
+    }
+
+    async fn delete_environment(&self, name: &str) -> Result<(), BackendError> {
+        let mut state = self.state.lock().unwrap();
+
+        if state.environments.remove(name).is_none() {
+            return Err(BackendError::NotFound(format!(
+                "Environment '{}' not found",
+                name
+            )));
+        }
+
+        Ok(())
     }
 }

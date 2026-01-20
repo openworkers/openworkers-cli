@@ -78,6 +78,33 @@ ow workers rm my-api
 
 Supported file types: `.js`, `.ts`, `.wasm`
 
+### Environments
+
+Manage environment variables and secrets.
+
+```bash
+# List environments
+ow env list
+
+# Get environment details
+ow env get production
+
+# Create an environment
+ow env create production -d "Production environment"
+
+# Set a variable
+ow env set production API_URL "https://api.example.com"
+
+# Set a secret (value will be masked)
+ow env set production API_KEY "secret-key" --secret
+
+# Remove a variable
+ow env unset production API_URL
+
+# Delete an environment
+ow env delete production
+```
+
 ### Database Operations
 
 Requires a `db` type alias.

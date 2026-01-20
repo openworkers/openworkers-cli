@@ -1,4 +1,7 @@
-use super::{Backend, BackendError, CreateWorkerInput, DeployInput, Deployment, Worker};
+use super::{
+    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
+    Environment, UpdateEnvironmentInput, Worker,
+};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 
@@ -175,5 +178,42 @@ impl Backend for DbBackend {
             deployed_at: row.get("deployed_at"),
             message: row.get("message"),
         })
+    }
+
+    async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
+        Err(BackendError::Api(
+            "Environments require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn get_environment(&self, _name: &str) -> Result<Environment, BackendError> {
+        Err(BackendError::Api(
+            "Environments require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn create_environment(
+        &self,
+        _input: CreateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        Err(BackendError::Api(
+            "Environments require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn update_environment(
+        &self,
+        _name: &str,
+        _input: UpdateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        Err(BackendError::Api(
+            "Environments require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn delete_environment(&self, _name: &str) -> Result<(), BackendError> {
+        Err(BackendError::Api(
+            "Environments require API access. Use an API alias.".to_string(),
+        ))
     }
 }

@@ -1,4 +1,7 @@
-use super::{Backend, BackendError, CreateWorkerInput, DeployInput, Deployment, Worker};
+use super::{
+    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
+    Environment, UpdateEnvironmentInput, Worker,
+};
 use reqwest::Client;
 
 pub struct ApiBackend {
@@ -153,5 +156,129 @@ impl Backend for ApiBackend {
 
         let deployment: Deployment = response.json().await?;
         Ok(deployment)
+    }
+
+    async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, "/environments")
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let environments: Vec<Environment> = response.json().await?;
+        Ok(environments)
+    }
+
+    async fn get_environment(&self, name: &str) -> Result<Environment, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/environments/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Environment '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let environment: Environment = response.json().await?;
+        Ok(environment)
+    }
+
+    async fn create_environment(
+        &self,
+        input: CreateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/environments")
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let environment: Environment = response.json().await?;
+        Ok(environment)
+    }
+
+    async fn update_environment(
+        &self,
+        name: &str,
+        input: UpdateEnvironmentInput,
+    ) -> Result<Environment, BackendError> {
+        let response = self
+            .request(reqwest::Method::PATCH, &format!("/environments/{}", name))
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Environment '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let environment: Environment = response.json().await?;
+        Ok(environment)
+    }
+
+    async fn delete_environment(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/environments/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Environment '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        Ok(())
     }
 }

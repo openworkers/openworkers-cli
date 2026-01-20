@@ -67,6 +67,58 @@ pub struct DeployInput {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Environment {
+    pub id: String,
+    pub name: String,
+    #[serde(alias = "desc")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub values: Vec<EnvironmentValue>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentValue {
+    pub id: String,
+    pub key: String,
+    pub value: String,
+    #[serde(rename = "type")]
+    pub value_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEnvironmentInput {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateEnvironmentInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<EnvironmentValueInput>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentValueInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(rename = "type")]
+    pub value_type: String,
+}
+
 pub trait Backend: Send + Sync {
     fn list_workers(
         &self,
@@ -92,4 +144,30 @@ pub trait Backend: Send + Sync {
         name: &str,
         input: DeployInput,
     ) -> impl std::future::Future<Output = Result<Deployment, BackendError>> + Send;
+
+    // Environment methods
+    fn list_environments(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<Environment>, BackendError>> + Send;
+
+    fn get_environment(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<Environment, BackendError>> + Send;
+
+    fn create_environment(
+        &self,
+        input: CreateEnvironmentInput,
+    ) -> impl std::future::Future<Output = Result<Environment, BackendError>> + Send;
+
+    fn update_environment(
+        &self,
+        name: &str,
+        input: UpdateEnvironmentInput,
+    ) -> impl std::future::Future<Output = Result<Environment, BackendError>> + Send;
+
+    fn delete_environment(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
 }
