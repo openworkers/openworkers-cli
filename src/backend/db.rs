@@ -1,6 +1,7 @@
 use super::{
-    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
-    Environment, UpdateEnvironmentInput, Worker,
+    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
+    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -214,6 +215,84 @@ impl Backend for DbBackend {
     async fn delete_environment(&self, _name: &str) -> Result<(), BackendError> {
         Err(BackendError::Api(
             "Environments require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    // Storage methods
+    async fn list_storage(&self) -> Result<Vec<StorageConfig>, BackendError> {
+        Err(BackendError::Api(
+            "Storage requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn get_storage(&self, _name: &str) -> Result<StorageConfig, BackendError> {
+        Err(BackendError::Api(
+            "Storage requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn create_storage(
+        &self,
+        _input: CreateStorageInput,
+    ) -> Result<StorageConfig, BackendError> {
+        Err(BackendError::Api(
+            "Storage requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn delete_storage(&self, _name: &str) -> Result<(), BackendError> {
+        Err(BackendError::Api(
+            "Storage requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    // KV methods
+    async fn list_kv(&self) -> Result<Vec<KvNamespace>, BackendError> {
+        Err(BackendError::Api(
+            "KV requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn get_kv(&self, _name: &str) -> Result<KvNamespace, BackendError> {
+        Err(BackendError::Api(
+            "KV requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn create_kv(&self, _input: CreateKvInput) -> Result<KvNamespace, BackendError> {
+        Err(BackendError::Api(
+            "KV requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn delete_kv(&self, _name: &str) -> Result<(), BackendError> {
+        Err(BackendError::Api(
+            "KV requires API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    // Database methods
+    async fn list_databases(&self) -> Result<Vec<Database>, BackendError> {
+        Err(BackendError::Api(
+            "Databases require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn get_database(&self, _name: &str) -> Result<Database, BackendError> {
+        Err(BackendError::Api(
+            "Databases require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn create_database(&self, _input: CreateDatabaseInput) -> Result<Database, BackendError> {
+        Err(BackendError::Api(
+            "Databases require API access. Use an API alias.".to_string(),
+        ))
+    }
+
+    async fn delete_database(&self, _name: &str) -> Result<(), BackendError> {
+        Err(BackendError::Api(
+            "Databases require API access. Use an API alias.".to_string(),
         ))
     }
 }

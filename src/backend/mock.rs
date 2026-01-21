@@ -1,6 +1,7 @@
 use super::{
-    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
-    Environment, UpdateEnvironmentInput, Worker,
+    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
+    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
 };
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -233,5 +234,104 @@ impl Backend for MockBackend {
         }
 
         Ok(())
+    }
+
+    // Storage methods (basic mock implementations)
+    async fn list_storage(&self) -> Result<Vec<StorageConfig>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn get_storage(&self, name: &str) -> Result<StorageConfig, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Storage '{}' not found",
+            name
+        )))
+    }
+
+    async fn create_storage(
+        &self,
+        input: CreateStorageInput,
+    ) -> Result<StorageConfig, BackendError> {
+        Ok(StorageConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name,
+            description: input.desc,
+            provider: input.provider,
+            bucket: input.bucket,
+            prefix: input.prefix,
+            endpoint: input.endpoint,
+            region: input.region,
+            public_url: input.public_url,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn delete_storage(&self, name: &str) -> Result<(), BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Storage '{}' not found",
+            name
+        )))
+    }
+
+    // KV methods (basic mock implementations)
+    async fn list_kv(&self) -> Result<Vec<KvNamespace>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn get_kv(&self, name: &str) -> Result<KvNamespace, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "KV namespace '{}' not found",
+            name
+        )))
+    }
+
+    async fn create_kv(&self, input: CreateKvInput) -> Result<KvNamespace, BackendError> {
+        Ok(KvNamespace {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name,
+            description: input.desc,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn delete_kv(&self, name: &str) -> Result<(), BackendError> {
+        Err(BackendError::NotFound(format!(
+            "KV namespace '{}' not found",
+            name
+        )))
+    }
+
+    // Database methods (basic mock implementations)
+    async fn list_databases(&self) -> Result<Vec<Database>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn get_database(&self, name: &str) -> Result<Database, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Database '{}' not found",
+            name
+        )))
+    }
+
+    async fn create_database(&self, input: CreateDatabaseInput) -> Result<Database, BackendError> {
+        Ok(Database {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name,
+            description: input.desc,
+            provider: input.provider,
+            max_rows: input.max_rows.unwrap_or(1000),
+            timeout_seconds: input.timeout_seconds.unwrap_or(30),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn delete_database(&self, name: &str) -> Result<(), BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Database '{}' not found",
+            name
+        )))
     }
 }

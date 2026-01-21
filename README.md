@@ -105,9 +105,74 @@ ow env unset production API_URL
 ow env delete production
 ```
 
-### Database Operations
+### Storage
 
-Requires a `db` type alias.
+Manage S3/R2 storage configurations.
+
+```bash
+# List storage configs
+ow storage list
+
+# Get storage details
+ow storage get my-storage
+
+# Create platform storage (shared R2)
+ow storage create my-storage
+
+# Create S3 storage
+ow storage create my-s3 --provider s3 \
+  --bucket my-bucket \
+  --access-key-id AKIAXXXXXXXX \
+  --secret-access-key xxxxx \
+  --endpoint https://s3.amazonaws.com
+
+# Delete storage
+ow storage delete my-storage
+```
+
+### KV
+
+Manage key-value namespaces.
+
+```bash
+# List KV namespaces
+ow kv list
+
+# Get KV details
+ow kv get my-kv
+
+# Create KV namespace
+ow kv create my-kv -d "Cache storage"
+
+# Delete KV namespace
+ow kv delete my-kv
+```
+
+### Databases
+
+Manage database bindings.
+
+```bash
+# List databases
+ow databases list
+
+# Get database details
+ow databases get my-db
+
+# Create platform database (shared)
+ow databases create my-db
+
+# Create Postgres binding
+ow databases create my-pg --provider postgres \
+  --connection-string "postgres://user:pass@host/db"
+
+# Delete database
+ow databases delete my-db
+```
+
+### Infra
+
+Database migrations (requires `db` type alias).
 
 ```bash
 # Run pending migrations

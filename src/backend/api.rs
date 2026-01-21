@@ -1,6 +1,7 @@
 use super::{
-    Backend, BackendError, CreateEnvironmentInput, CreateWorkerInput, DeployInput, Deployment,
-    Environment, UpdateEnvironmentInput, Worker,
+    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
+    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
 };
 use reqwest::Client;
 
@@ -266,6 +267,279 @@ impl Backend for ApiBackend {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(BackendError::NotFound(format!(
                 "Environment '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        Ok(())
+    }
+
+    // Storage methods
+    async fn list_storage(&self) -> Result<Vec<StorageConfig>, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, "/storage")
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let configs: Vec<StorageConfig> = response.json().await?;
+        Ok(configs)
+    }
+
+    async fn get_storage(&self, name: &str) -> Result<StorageConfig, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/storage/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Storage '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let config: StorageConfig = response.json().await?;
+        Ok(config)
+    }
+
+    async fn create_storage(
+        &self,
+        input: CreateStorageInput,
+    ) -> Result<StorageConfig, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/storage")
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let config: StorageConfig = response.json().await?;
+        Ok(config)
+    }
+
+    async fn delete_storage(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/storage/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Storage '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        Ok(())
+    }
+
+    // KV methods
+    async fn list_kv(&self) -> Result<Vec<KvNamespace>, BackendError> {
+        let response = self.request(reqwest::Method::GET, "/kv").send().await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let namespaces: Vec<KvNamespace> = response.json().await?;
+        Ok(namespaces)
+    }
+
+    async fn get_kv(&self, name: &str) -> Result<KvNamespace, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/kv/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "KV namespace '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let namespace: KvNamespace = response.json().await?;
+        Ok(namespace)
+    }
+
+    async fn create_kv(&self, input: CreateKvInput) -> Result<KvNamespace, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/kv")
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let namespace: KvNamespace = response.json().await?;
+        Ok(namespace)
+    }
+
+    async fn delete_kv(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/kv/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "KV namespace '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        Ok(())
+    }
+
+    // Database methods
+    async fn list_databases(&self) -> Result<Vec<Database>, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, "/databases")
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let databases: Vec<Database> = response.json().await?;
+        Ok(databases)
+    }
+
+    async fn get_database(&self, name: &str) -> Result<Database, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/databases/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Database '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let database: Database = response.json().await?;
+        Ok(database)
+    }
+
+    async fn create_database(&self, input: CreateDatabaseInput) -> Result<Database, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/databases")
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let database: Database = response.json().await?;
+        Ok(database)
+    }
+
+    async fn delete_database(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/databases/{}", name))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Database '{}' not found",
                 name
             )));
         }
