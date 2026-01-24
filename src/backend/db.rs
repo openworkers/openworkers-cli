@@ -12,14 +12,12 @@ use zip::ZipArchive;
 
 pub struct DbBackend {
     pool: PgPool,
+    user_id: uuid::Uuid,
 }
 
 impl DbBackend {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
-    async fn get_or_create_admin_user(&self) -> Result<uuid::Uuid, BackendError> {
+    pub async fn new(pool: PgPool) -> Result<Self, BackendError> {
+        // Get or create admin user on initialization
         let user_id: uuid::Uuid = sqlx::query_scalar(
             r#"
             INSERT INTO users (id, username, created_at, updated_at)
@@ -28,10 +26,10 @@ impl DbBackend {
             RETURNING id
             "#,
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
-        Ok(user_id)
+        Ok(Self { pool, user_id })
     }
 
     async fn get_environment_values(
@@ -70,9 +68,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", current_version, created_at, updated_at
             FROM workers
+            WHERE user_id = $1
             ORDER BY name
             "#,
         )
+        .bind(self.user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -96,10 +96,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", current_version, created_at, updated_at
             FROM workers
-            WHERE name = $1
+            WHERE name = $1 AND user_id = $2
             "#,
         )
         .bind(name)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
@@ -115,19 +116,6 @@ impl Backend for DbBackend {
     }
 
     async fn create_worker(&self, input: CreateWorkerInput) -> Result<Worker, BackendError> {
-        // For CLI/admin mode, we need a user_id
-        // For now, get or create an "admin" user
-        let user_id: uuid::Uuid = sqlx::query_scalar(
-            r#"
-            INSERT INTO users (id, username, created_at, updated_at)
-            VALUES (gen_random_uuid(), 'cli-admin', now(), now())
-            ON CONFLICT (username) DO UPDATE SET username = users.username
-            RETURNING id
-            "#,
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
         let row = sqlx::query(
             r#"
             INSERT INTO workers (name, "desc", user_id)
@@ -137,7 +125,7 @@ impl Backend for DbBackend {
         )
         .bind(&input.name)
         .bind(&input.description)
-        .bind(user_id)
+        .bind(self.user_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -154,8 +142,9 @@ impl Backend for DbBackend {
     }
 
     async fn delete_worker(&self, name: &str) -> Result<(), BackendError> {
-        let result = sqlx::query("DELETE FROM workers WHERE name = $1")
+        let result = sqlx::query("DELETE FROM workers WHERE name = $1 AND user_id = $2")
             .bind(name)
+            .bind(self.user_id)
             .execute(&self.pool)
             .await?;
 
@@ -181,13 +170,16 @@ impl Backend for DbBackend {
                 Some(uuid)
             } else {
                 Some(
-                    sqlx::query_scalar("SELECT id FROM environments WHERE name = $1")
-                        .bind(env_ref)
-                        .fetch_optional(&self.pool)
-                        .await?
-                        .ok_or_else(|| {
-                            BackendError::NotFound(format!("Environment '{}' not found", env_ref))
-                        })?,
+                    sqlx::query_scalar(
+                        "SELECT id FROM environments WHERE name = $1 AND user_id = $2",
+                    )
+                    .bind(env_ref)
+                    .bind(self.user_id)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .ok_or_else(|| {
+                        BackendError::NotFound(format!("Environment '{}' not found", env_ref))
+                    })?,
                 )
             }
         } else {
@@ -199,12 +191,13 @@ impl Backend for DbBackend {
             UPDATE workers
             SET environment_id = COALESCE($2, environment_id),
                 updated_at = now()
-            WHERE name = $1
+            WHERE name = $1 AND user_id = $3
             RETURNING id, name, "desc", current_version, created_at, updated_at
             "#,
         )
         .bind(name)
         .bind(env_id)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
@@ -474,9 +467,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", created_at, updated_at
             FROM environments
+            WHERE user_id = $1
             ORDER BY name
             "#,
         )
+        .bind(self.user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -504,10 +499,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", created_at, updated_at
             FROM environments
-            WHERE name = $1
+            WHERE name = $1 AND user_id = $2
             "#,
         )
         .bind(name)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("Environment '{}' not found", name)))?;
@@ -529,9 +525,6 @@ impl Backend for DbBackend {
         &self,
         input: CreateEnvironmentInput,
     ) -> Result<Environment, BackendError> {
-        // Get cli-admin user
-        let user_id = self.get_or_create_admin_user().await?;
-
         let row = sqlx::query(
             r#"
             INSERT INTO environments (name, "desc", user_id)
@@ -541,7 +534,7 @@ impl Backend for DbBackend {
         )
         .bind(&input.name)
         .bind(&input.desc)
-        .bind(user_id)
+        .bind(self.user_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -560,15 +553,15 @@ impl Backend for DbBackend {
         name: &str,
         input: UpdateEnvironmentInput,
     ) -> Result<Environment, BackendError> {
-        // Get environment ID and user_id
-        let row = sqlx::query("SELECT id, user_id FROM environments WHERE name = $1")
+        // Get environment ID
+        let row = sqlx::query("SELECT id FROM environments WHERE name = $1 AND user_id = $2")
             .bind(name)
+            .bind(self.user_id)
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| BackendError::NotFound(format!("Environment '{}' not found", name)))?;
 
         let env_id: uuid::Uuid = row.get("id");
-        let user_id: uuid::Uuid = row.get("user_id");
 
         // Update name if provided
         if let Some(new_name) = &input.name {
@@ -612,7 +605,7 @@ impl Backend for DbBackend {
                         "#,
                     )
                     .bind(env_id)
-                    .bind(user_id)
+                    .bind(self.user_id)
                     .bind(&value.key)
                     .bind(val)
                     .bind(&value.value_type)
@@ -628,8 +621,9 @@ impl Backend for DbBackend {
     }
 
     async fn delete_environment(&self, name: &str) -> Result<(), BackendError> {
-        let result = sqlx::query("DELETE FROM environments WHERE name = $1")
+        let result = sqlx::query("DELETE FROM environments WHERE name = $1 AND user_id = $2")
             .bind(name)
+            .bind(self.user_id)
             .execute(&self.pool)
             .await?;
 
@@ -649,9 +643,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", 'r2' as provider, bucket, prefix, endpoint, region, public_url, created_at, updated_at
             FROM storage_configs
+            WHERE user_id = $1
             ORDER BY name
             "#,
         )
+        .bind(self.user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -680,10 +676,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", 'r2' as provider, bucket, prefix, endpoint, region, public_url, created_at, updated_at
             FROM storage_configs
-            WHERE name = $1
+            WHERE name = $1 AND user_id = $2
             "#,
         )
         .bind(name)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("Storage config '{}' not found", name)))?;
@@ -707,9 +704,6 @@ impl Backend for DbBackend {
         &self,
         input: CreateStorageInput,
     ) -> Result<StorageConfig, BackendError> {
-        // Get cli-admin user
-        let user_id = self.get_or_create_admin_user().await?;
-
         let row = sqlx::query(
             r#"
             INSERT INTO storage_configs (name, "desc", user_id, bucket, prefix, access_key_id, secret_access_key, endpoint, region, public_url)
@@ -719,7 +713,7 @@ impl Backend for DbBackend {
         )
         .bind(&input.name)
         .bind(&input.desc)
-        .bind(user_id)
+        .bind(self.user_id)
         .bind(&input.bucket)
         .bind(&input.prefix)
         .bind(&input.access_key_id)
@@ -746,8 +740,9 @@ impl Backend for DbBackend {
     }
 
     async fn delete_storage(&self, name: &str) -> Result<(), BackendError> {
-        let result = sqlx::query("DELETE FROM storage_configs WHERE name = $1")
+        let result = sqlx::query("DELETE FROM storage_configs WHERE name = $1 AND user_id = $2")
             .bind(name)
+            .bind(self.user_id)
             .execute(&self.pool)
             .await?;
 
@@ -767,9 +762,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", created_at, updated_at
             FROM kv_configs
+            WHERE user_id = $1
             ORDER BY name
             "#,
         )
+        .bind(self.user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -792,10 +789,11 @@ impl Backend for DbBackend {
             r#"
             SELECT id, name, "desc", created_at, updated_at
             FROM kv_configs
-            WHERE name = $1
+            WHERE name = $1 AND user_id = $2
             "#,
         )
         .bind(name)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("KV namespace '{}' not found", name)))?;
@@ -810,8 +808,6 @@ impl Backend for DbBackend {
     }
 
     async fn create_kv(&self, input: CreateKvInput) -> Result<KvNamespace, BackendError> {
-        let user_id = self.get_or_create_admin_user().await?;
-
         let row = sqlx::query(
             r#"
             INSERT INTO kv_configs (name, "desc", user_id)
@@ -821,7 +817,7 @@ impl Backend for DbBackend {
         )
         .bind(&input.name)
         .bind(&input.desc)
-        .bind(user_id)
+        .bind(self.user_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -835,8 +831,9 @@ impl Backend for DbBackend {
     }
 
     async fn delete_kv(&self, name: &str) -> Result<(), BackendError> {
-        let result = sqlx::query("DELETE FROM kv_configs WHERE name = $1")
+        let result = sqlx::query("DELETE FROM kv_configs WHERE name = $1 AND user_id = $2")
             .bind(name)
+            .bind(self.user_id)
             .execute(&self.pool)
             .await?;
 

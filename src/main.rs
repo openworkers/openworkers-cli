@@ -145,7 +145,7 @@ async fn run_workers_command(alias: Option<String>, command: WorkersCommand) -> 
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool);
+            let backend = DbBackend::new(pool).await.map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
         }
 
@@ -171,7 +171,7 @@ async fn run_env_command(alias: Option<String>, command: EnvCommand) -> Result<(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool);
+            let backend = DbBackend::new(pool).await.map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
         }
 
@@ -197,7 +197,7 @@ async fn run_storage_command(alias: Option<String>, command: StorageCommand) -> 
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool);
+            let backend = DbBackend::new(pool).await.map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
         }
 
@@ -223,7 +223,7 @@ async fn run_kv_command(alias: Option<String>, command: KvCommand) -> Result<(),
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool);
+            let backend = DbBackend::new(pool).await.map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
         }
 
@@ -252,7 +252,7 @@ async fn run_databases_command(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool);
+            let backend = DbBackend::new(pool).await.map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
         }
 
