@@ -41,7 +41,7 @@ ow workers create my-api -d "REST API"
 ow workers get my-api
 ow workers deploy my-api ./worker.ts -m "Initial deploy"
 ow workers upload my-app ./dist      # Upload folder with assets
-ow workers link my-api --env prod    # Link environment
+ow workers link my-api --env my-env  # Link environment
 ow workers delete my-api
 ```
 
@@ -53,18 +53,18 @@ Manage variables, secrets, and resource bindings.
 
 ```bash
 ow env list
-ow env create prod -d "Production"
-ow env get prod
+ow env create my-env -d "Production"
+ow env get my-env
 
 # Variables and secrets
-ow env set prod API_URL "https://api.example.com"
-ow env set prod API_KEY "secret" --secret
-ow env unset prod OLD_VAR
+ow env set my-env API_URL "https://api.example.com"
+ow env set my-env API_KEY "secret" --secret
+ow env unset my-env OLD_VAR
 
 # Bind resources
-ow env bind prod CACHE my-kv --type kv
-ow env bind prod DB my-db --type database
-ow env bind prod ASSETS my-storage --type assets
+ow env bind my-env CACHE my-kv --type kv
+ow env bind my-env DB my-db --type database
+ow env bind my-env ASSETS my-storage --type assets
 
 ow env delete old-env
 ```
