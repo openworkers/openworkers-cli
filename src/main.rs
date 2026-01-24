@@ -124,6 +124,7 @@ enum Commands {
     /// Manage S3/R2 storage configurations for file storage
     #[command(
         visible_alias = "s",
+        alias = "storages",
         after_help = "Examples:\n  \
         ow storage list                        List storage configs\n  \
         ow storage create my-bucket --bucket name --endpoint https://..."
@@ -136,6 +137,7 @@ enum Commands {
     /// Manage KV namespaces for key-value storage
     #[command(
         visible_alias = "k",
+        alias = "kvs",
         after_help = "Examples:\n  \
         ow kv list                             List KV namespaces\n  \
         ow kv create cache                     Create 'cache' namespace"
@@ -224,11 +226,13 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "s",
         "k",
         "d",
-        // Singular variants (for flexibility)
+        // Singular/plural variants (for flexibility)
         "worker",
         "envs",
         "environment",
         "environments",
+        "storages",
+        "kvs",
         "db",
         "database",
         // Help flags
