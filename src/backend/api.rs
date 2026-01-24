@@ -1,7 +1,7 @@
 use super::{
     Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
     CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, Worker,
 };
 use reqwest::Client;
 
@@ -128,6 +128,37 @@ impl Backend for ApiBackend {
         Ok(())
     }
 
+    async fn update_worker(
+        &self,
+        name: &str,
+        input: UpdateWorkerInput,
+    ) -> Result<Worker, BackendError> {
+        let response = self
+            .request(reqwest::Method::PATCH, &format!("/workers/{}", name))
+            .json(&input)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Worker '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let worker: Worker = response.json().await?;
+        Ok(worker)
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -157,6 +188,52 @@ impl Backend for ApiBackend {
 
         let deployment: Deployment = response.json().await?;
         Ok(deployment)
+    }
+
+    async fn upload_worker(
+        &self,
+        name: &str,
+        zip_data: Vec<u8>,
+    ) -> Result<UploadResult, BackendError> {
+        use reqwest::multipart::{Form, Part};
+
+        // First resolve worker name to ID
+        let worker = self.get_worker(name).await?;
+
+        let part = Part::bytes(zip_data)
+            .file_name("upload.zip")
+            .mime_str("application/zip")
+            .map_err(|e| BackendError::Api(e.to_string()))?;
+
+        let form = Form::new().part("file", part);
+
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/workers/{}/upload", worker.id),
+            )
+            .multipart(form)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Worker '{}' not found",
+                name
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        let result: UploadResult = response.json().await?;
+        Ok(result)
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {

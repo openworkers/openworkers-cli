@@ -57,6 +57,22 @@ pub enum EnvCommand {
         /// Variable key
         key: String,
     },
+
+    /// Bind a resource to an environment
+    Bind {
+        /// Environment name
+        env: String,
+
+        /// Binding name (e.g. ASSETS, MY_KV, MY_DB)
+        key: String,
+
+        /// Resource name to bind
+        resource: String,
+
+        /// Binding type
+        #[arg(short = 't', long, value_parser = ["assets", "storage", "kv", "database"])]
+        binding_type: String,
+    },
 }
 
 impl EnvCommand {
@@ -73,6 +89,12 @@ impl EnvCommand {
                 secret,
             } => cmd_set(backend, &env, &key, &value, secret).await,
             Self::Unset { env, key } => cmd_unset(backend, &env, &key).await,
+            Self::Bind {
+                env,
+                key,
+                resource,
+                binding_type,
+            } => cmd_bind(backend, &env, &key, &resource, &binding_type).await,
         }
     }
 }
@@ -259,6 +281,69 @@ async fn cmd_unset<B: Backend>(backend: &B, env_name: &str, key: &str) -> Result
             )));
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_bind<B: Backend>(
+    backend: &B,
+    env_name: &str,
+    key: &str,
+    resource: &str,
+    binding_type: &str,
+) -> Result<(), BackendError> {
+    // Get resource ID based on type
+    let resource_id = match binding_type {
+        "assets" | "storage" => {
+            let storage = backend.get_storage(resource).await?;
+            storage.id
+        }
+        "kv" => {
+            let kv = backend.get_kv(resource).await?;
+            kv.id
+        }
+        "database" => {
+            let db = backend.get_database(resource).await?;
+            db.id
+        }
+        _ => {
+            return Err(BackendError::Api(format!(
+                "Unknown binding type: {}",
+                binding_type
+            )));
+        }
+    };
+
+    // Get current environment to find existing binding
+    let env = backend.get_environment(env_name).await?;
+
+    let existing_id = env
+        .values
+        .iter()
+        .find(|v| v.key == key)
+        .map(|v| v.id.clone());
+
+    let value_input = EnvironmentValueInput {
+        id: existing_id,
+        key: key.to_string(),
+        value: Some(resource_id),
+        value_type: binding_type.to_string(),
+    };
+
+    let input = UpdateEnvironmentInput {
+        name: None,
+        values: Some(vec![value_input]),
+    };
+
+    backend.update_environment(env_name, input).await?;
+
+    println!(
+        "{} Binding '{}' ({}) added to environment '{}'.",
+        "Bound".green(),
+        key.bold(),
+        binding_type,
+        env_name.bold()
+    );
 
     Ok(())
 }

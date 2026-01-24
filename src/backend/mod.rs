@@ -49,6 +49,15 @@ pub struct CreateWorkerInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateWorkerInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub worker_id: String,
     pub version: i32,
@@ -65,6 +74,29 @@ pub struct DeployInput {
     pub code_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadResult {
+    pub success: bool,
+    pub worker: UploadWorkerInfo,
+    pub uploaded: UploadedCounts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadWorkerInfo {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadedCounts {
+    pub script: bool,
+    pub assets: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,11 +262,23 @@ pub trait Backend: Send + Sync {
         name: &str,
     ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
 
+    fn update_worker(
+        &self,
+        name: &str,
+        input: UpdateWorkerInput,
+    ) -> impl std::future::Future<Output = Result<Worker, BackendError>> + Send;
+
     fn deploy_worker(
         &self,
         name: &str,
         input: DeployInput,
     ) -> impl std::future::Future<Output = Result<Deployment, BackendError>> + Send;
+
+    fn upload_worker(
+        &self,
+        name: &str,
+        zip_data: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<UploadResult, BackendError>> + Send;
 
     // Environment methods
     fn list_environments(

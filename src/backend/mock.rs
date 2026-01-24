@@ -1,7 +1,8 @@
 use super::{
     Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
     CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult,
+    UploadWorkerInfo, UploadedCounts, Worker,
 };
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -115,6 +116,22 @@ impl Backend for MockBackend {
         Ok(())
     }
 
+    async fn update_worker(
+        &self,
+        name: &str,
+        _input: UpdateWorkerInput,
+    ) -> Result<Worker, BackendError> {
+        let mut state = self.state.lock().unwrap();
+
+        let worker = state
+            .workers
+            .get_mut(name)
+            .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
+
+        worker.updated_at = Utc::now();
+        Ok(worker.clone())
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -158,6 +175,32 @@ impl Backend for MockBackend {
             .push(deployment.clone());
 
         Ok(deployment)
+    }
+
+    async fn upload_worker(
+        &self,
+        name: &str,
+        _zip_data: Vec<u8>,
+    ) -> Result<UploadResult, BackendError> {
+        let state = self.state.lock().unwrap();
+
+        let worker = state
+            .workers
+            .get(name)
+            .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
+
+        Ok(UploadResult {
+            success: true,
+            worker: UploadWorkerInfo {
+                id: worker.id.clone(),
+                name: worker.name.clone(),
+                url: format!("https://{}.workers.rocks", worker.name),
+            },
+            uploaded: UploadedCounts {
+                script: true,
+                assets: 0,
+            },
+        })
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {

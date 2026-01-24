@@ -1,4 +1,6 @@
-use crate::backend::{Backend, BackendError, CreateWorkerInput, DeployInput, Worker};
+use crate::backend::{
+    Backend, BackendError, CreateWorkerInput, DeployInput, UpdateWorkerInput, Worker,
+};
 use clap::Subcommand;
 use colored::Colorize;
 use std::path::PathBuf;
@@ -48,6 +50,25 @@ pub enum WorkersCommand {
         #[arg(short, long)]
         message: Option<String>,
     },
+
+    /// Link an environment to a worker
+    Link {
+        /// Worker name
+        name: String,
+
+        /// Environment name
+        #[arg(short, long)]
+        env: String,
+    },
+
+    /// Upload a zip archive with worker.js and assets
+    Upload {
+        /// Worker name
+        name: String,
+
+        /// Path to the zip file
+        file: PathBuf,
+    },
 }
 
 impl WorkersCommand {
@@ -66,6 +87,8 @@ impl WorkersCommand {
                 file,
                 message,
             } => cmd_deploy(backend, &name, file, message).await,
+            Self::Link { name, env } => cmd_link(backend, &name, &env).await,
+            Self::Upload { name, file } => cmd_upload(backend, &name, file).await,
         }
     }
 }
@@ -220,6 +243,71 @@ async fn cmd_deploy<B: Backend>(
     if let Some(msg) = &deployment.message {
         println!("{:12} {}", "Message:".dimmed(), msg);
     }
+
+    Ok(())
+}
+
+async fn cmd_link<B: Backend>(backend: &B, name: &str, env: &str) -> Result<(), BackendError> {
+    // Verify environment exists
+    let environment = backend.get_environment(env).await?;
+
+    let input = UpdateWorkerInput {
+        name: None,
+        environment: Some(environment.id),
+    };
+
+    backend.update_worker(name, input).await?;
+
+    println!(
+        "{} Worker '{}' linked to environment '{}'.",
+        "Linked".green(),
+        name.bold(),
+        env.bold()
+    );
+
+    Ok(())
+}
+
+async fn cmd_upload<B: Backend>(
+    backend: &B,
+    name: &str,
+    file: PathBuf,
+) -> Result<(), BackendError> {
+    // Verify it's a zip file
+    if file.extension().and_then(|e| e.to_str()) != Some("zip") {
+        return Err(BackendError::Api("File must be a .zip archive".to_string()));
+    }
+
+    // Read zip file
+    let zip_data = std::fs::read(&file).map_err(|e| {
+        BackendError::Api(format!("Failed to read file '{}': {}", file.display(), e))
+    })?;
+
+    let size_kb = zip_data.len() / 1024;
+    println!(
+        "{} Uploading {} ({} KB)...",
+        "→".blue(),
+        file.display(),
+        size_kb
+    );
+
+    let result = backend.upload_worker(name, zip_data).await?;
+
+    println!(
+        "{} Uploaded to '{}' (v{})",
+        "Uploaded".green(),
+        result.worker.name.bold(),
+        result.uploaded.assets
+    );
+
+    println!();
+    println!("{:12} {}", "URL:".dimmed(), result.worker.url);
+    println!(
+        "{:12} {}",
+        "Script:".dimmed(),
+        if result.uploaded.script { "✓" } else { "✗" }
+    );
+    println!("{:12} {} files", "Assets:".dimmed(), result.uploaded.assets);
 
     Ok(())
 }

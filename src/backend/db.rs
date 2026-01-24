@@ -1,7 +1,7 @@
 use super::{
     Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
     CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, Worker,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, Worker,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -121,6 +121,51 @@ impl Backend for DbBackend {
         Ok(())
     }
 
+    async fn update_worker(
+        &self,
+        name: &str,
+        input: UpdateWorkerInput,
+    ) -> Result<Worker, BackendError> {
+        // Get environment_id if environment name is provided
+        let env_id: Option<uuid::Uuid> = if let Some(env_name) = &input.environment {
+            Some(
+                sqlx::query_scalar("SELECT id FROM environments WHERE name = $1")
+                    .bind(env_name)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .ok_or_else(|| {
+                        BackendError::NotFound(format!("Environment '{}' not found", env_name))
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let row = sqlx::query(
+            r#"
+            UPDATE workers
+            SET environment_id = COALESCE($2, environment_id),
+                updated_at = now()
+            WHERE name = $1
+            RETURNING id, name, "desc", current_version, created_at, updated_at
+            "#,
+        )
+        .bind(name)
+        .bind(env_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
+
+        Ok(Worker {
+            id: row.get::<uuid::Uuid, _>("id").to_string(),
+            name: row.get("name"),
+            description: row.get("desc"),
+            current_version: row.get("current_version"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -179,6 +224,16 @@ impl Backend for DbBackend {
             deployed_at: row.get("deployed_at"),
             message: row.get("message"),
         })
+    }
+
+    async fn upload_worker(
+        &self,
+        _name: &str,
+        _zip_data: Vec<u8>,
+    ) -> Result<UploadResult, BackendError> {
+        Err(BackendError::Api(
+            "Upload requires API access (for S3 assets). Use an API alias.".to_string(),
+        ))
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
