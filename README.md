@@ -76,7 +76,7 @@ ow env bind my-env DB my-db --type database
 ow env bind my-env ASSETS my-storage --type assets
 
 # Link environment to a worker
-ow workers link my-api --env my-env
+ow workers link my-api my-env
 
 ow env delete old-env
 ```

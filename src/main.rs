@@ -30,7 +30,7 @@ const EXAMPLES: &str = color_print::cstr!(
   ow env create prod                    <dim>Create an environment</dim>
   ow kv create cache                    <dim>Create a KV namespace</dim>
   ow env bind prod CACHE cache -t kv    <dim>Bind KV to environment</dim>
-  ow workers link my-api --env prod     <dim>Link environment to worker</dim>
+  ow workers link my-api my-env     <dim>Link environment to worker</dim>
 
   <dim># Using aliases (for multiple backends)</dim>
   ow alias list                         <dim>Show configured aliases</dim>
@@ -44,7 +44,7 @@ const EXAMPLES: &str = color_print::cstr!(
 
 #[derive(Parser)]
 #[command(name = "ow")]
-#[command(author, version)]
+#[command(author, version, disable_version_flag = true)]
 #[command(about = "OpenWorkers CLI - Deploy and manage serverless workers")]
 #[command(
     long_about = "OpenWorkers CLI - Deploy and manage serverless workers.\n\n\
@@ -54,6 +54,10 @@ const EXAMPLES: &str = color_print::cstr!(
 )]
 #[command(after_help = EXAMPLES)]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -95,7 +99,7 @@ enum Commands {
         ow workers create my-api               Create worker 'my-api'\n  \
         ow workers deploy my-api worker.ts     Deploy TypeScript code\n  \
         ow workers upload my-app ./dist        Upload folder with assets\n  \
-        ow workers link my-api --env prod      Link to environment"
+        ow workers link my-api my-env      Link to environment"
     )]
     Workers {
         #[command(subcommand)]
@@ -240,7 +244,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "--help",
         "-h",
         "--version",
-        "-V",
+        "-v",
     ];
 
     if known_commands.contains(&potential_alias.as_str()) {

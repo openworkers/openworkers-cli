@@ -60,15 +60,12 @@ pub enum WorkersCommand {
     },
 
     /// Link an environment to a worker (for bindings and secrets)
-    #[command(after_help = "Examples:\n  \
-        ow workers link my-api --env production\n  \
-        ow workers link my-api -e staging")]
+    #[command(after_help = "Example:\n  ow workers link my-api my-env")]
     Link {
         /// Worker name
         name: String,
 
         /// Environment name to link
-        #[arg(short, long)]
         env: String,
     },
 
