@@ -2,221 +2,145 @@
 
 Command-line interface for managing OpenWorkers deployments.
 
-## Installation
+## Quick Start
 
 ```bash
+# Install
 cargo install --path .
+
+# Login (opens browser)
+ow login
+
+# Create and deploy a worker
+ow workers create my-api
+ow workers deploy my-api worker.ts
+
+# Your worker is live at https://my-api.workers.rocks
 ```
-
-## Configuration
-
-The CLI uses aliases to connect to different backends. Config is stored in `~/.openworkers/config.json`.
-
-### Alias Types
-
-- **API**: Connect via REST API (hosted or self-hosted)
-- **DB**: Direct PostgreSQL connection (for infra/migrations)
-
-### Managing Aliases
-
-```bash
-# Add API alias
-ow alias set prod --api https://dash.openworkers.com/api/v1 --token <token>
-ow alias set dev --api http://localhost:7000 --token <token>
-
-# Add DB alias (for infrastructure operations)
-ow alias set infra --db postgres://user:pass@host/db
-
-# List aliases
-ow alias list
-
-# Set default
-ow alias set-default prod
-
-# Remove alias
-ow alias rm old-alias
-```
-
-### Default Alias
-
-On first run, a `default` alias pointing to `https://dash.openworkers.com/api/v1` is created as default.
-
-## Command Shortcuts
-
-Resources:
-
-| Command     | Short |
-| ----------- | ----- |
-| `workers`   | `w`   |
-| `env`       | `e`   |
-| `storage`   | `s`   |
-| `kv`        | `k`   |
-| `databases` | `d`   |
-
-Operations:
-
-| Command  | Short |
-| -------- | ----- |
-| `list`   | `ls`  |
-| `delete` | `rm`  |
 
 ## Commands
 
-### Login
+| Command     | Short | Description                    |
+| ----------- | ----- | ------------------------------ |
+| `workers`   | `w`   | Create, deploy, manage workers |
+| `env`       | `e`   | Environment variables/secrets  |
+| `storage`   | `s`   | S3/R2 storage configurations   |
+| `kv`        | `k`   | Key-value namespaces           |
+| `databases` | `d`   | SQL database bindings          |
+| `alias`     |       | Backend connection aliases     |
+| `login`     |       | Authenticate with API          |
+| `migrate`   |       | Database schema migrations     |
+
+Common operations: `list` (`ls`), `get`, `create`, `delete` (`rm`)
+
+## Workers
 
 ```bash
-# Set token on default alias
-ow login
-
-# Set token on specific alias
-ow dev login
-```
-
-### Workers
-
-```bash
-# List workers
 ow workers list
-ow workers ls
-
-# Create a worker
-ow workers create my-api -d "My API worker"
-ow workers create my-api --language javascript
-
-# Get worker details
+ow workers create my-api -d "REST API"
 ow workers get my-api
-
-# Deploy code to a worker
-ow workers deploy my-api ./src/index.ts
-ow workers deploy my-api ./src/index.ts -m "Fix bug"
-
-# Delete a worker
+ow workers deploy my-api ./worker.ts -m "Initial deploy"
+ow workers upload my-app ./dist      # Upload folder with assets
+ow workers link my-api --env prod    # Link environment
 ow workers delete my-api
-ow workers rm my-api
 ```
 
 Supported file types: `.js`, `.ts`, `.wasm`
 
-### Environments
+## Environments
 
-Manage environment variables and secrets.
+Manage variables, secrets, and resource bindings.
 
 ```bash
-# List environments
 ow env list
+ow env create prod -d "Production"
+ow env get prod
 
-# Get environment details
-ow env get production
+# Variables and secrets
+ow env set prod API_URL "https://api.example.com"
+ow env set prod API_KEY "secret" --secret
+ow env unset prod OLD_VAR
 
-# Create an environment
-ow env create production -d "Production environment"
+# Bind resources
+ow env bind prod CACHE my-kv --type kv
+ow env bind prod DB my-db --type database
+ow env bind prod ASSETS my-storage --type assets
 
-# Set a variable
-ow env set production API_URL "https://api.example.com"
-
-# Set a secret (value will be masked)
-ow env set production API_KEY "secret-key" --secret
-
-# Remove a variable
-ow env unset production API_URL
-
-# Delete an environment
-ow env delete production
+ow env delete old-env
 ```
 
-### Storage
+## Storage
 
-Manage S3/R2 storage configurations.
+S3-compatible storage (R2, MinIO, AWS S3).
 
 ```bash
-# List storage configs
 ow storage list
-
-# Get storage details
-ow storage get my-storage
-
-# Create platform storage (shared R2)
 ow storage create my-storage
-
-# Create S3 storage
 ow storage create my-s3 --provider s3 \
   --bucket my-bucket \
-  --access-key-id AKIAXXXXXXXX \
-  --secret-access-key xxxxx \
-  --endpoint https://s3.amazonaws.com
-
-# Delete storage
+  --endpoint https://xxx.r2.cloudflarestorage.com \
+  --access-key-id AKIA... \
+  --secret-access-key ...
 ow storage delete my-storage
 ```
 
-### KV
+## KV
 
-Manage key-value namespaces.
+Key-value namespaces for caching and sessions.
 
 ```bash
-# List KV namespaces
 ow kv list
-
-# Get KV details
-ow kv get my-kv
-
-# Create KV namespace
-ow kv create my-kv -d "Cache storage"
-
-# Delete KV namespace
-ow kv delete my-kv
+ow kv create cache -d "API cache"
+ow kv get cache
+ow kv delete cache
 ```
 
-### Databases
+## Databases
 
-Manage database bindings.
+SQL database bindings.
 
 ```bash
-# List databases
 ow databases list
-
-# Get database details
-ow databases get my-db
-
-# Create platform database (shared)
 ow databases create my-db
-
-# Create Postgres binding
 ow databases create my-pg --provider postgres \
   --connection-string "postgres://user:pass@host/db"
-
-# Delete database
 ow databases delete my-db
 ```
 
-### Migrations
+## Aliases
 
-Database schema migrations (requires `db` type alias).
+The CLI supports multiple backends via aliases. Config is stored in `~/.openworkers/config.json`.
 
 ```bash
-# Check migration status
-ow local migrate status
+# API backend (hosted or self-hosted)
+ow alias set prod --api https://dash.openworkers.com
+ow alias set dev --api http://localhost:8080 --insecure
 
-# Run pending migrations
-ow local migrate run
+# DB backend (direct PostgreSQL, for migrations)
+ow alias set local --db postgres://user:pass@localhost/ow --user admin@example.com
 
-# Baseline existing database (mark all migrations as applied)
-ow local migrate baseline
+# Manage aliases
+ow alias list
+ow alias set-default prod
+ow alias rm old-alias
 ```
 
-### Using Aliases
+Use an alias by prefixing commands:
 
 ```bash
-# Use default alias
-ow workers list
+ow workers list           # Uses default alias
+ow prod workers list      # Uses 'prod' alias
+ow local migrate run      # Uses 'local' alias
+```
 
-# Use specific alias as first argument
-ow prod workers list
-ow dev workers get my-api
-ow local migrate run
+## Migrations
 
-# Or use --alias flag
-ow --alias prod workers list
+Database schema migrations (requires DB alias).
+
+```bash
+ow local migrate status    # Show pending migrations
+ow local migrate run       # Apply migrations
+ow local migrate baseline  # Mark all as applied (existing DB)
 ```
 
 ## Config File
@@ -231,14 +155,9 @@ ow --alias prod workers list
       "url": "https://dash.openworkers.com/api/v1",
       "token": "ow_xxx"
     },
-    "dev": {
-      "type": "api",
-      "url": "http://localhost:7000",
-      "token": "ow_xxx"
-    },
     "local": {
       "type": "db",
-      "database_url": "postgres://user:pass@host/db",
+      "database_url": "postgres://localhost/openworkers",
       "user": "admin@example.com"
     }
   }
@@ -250,5 +169,5 @@ ow --alias prod workers list
 ```bash
 cargo build
 cargo run -- workers list
-cargo run -- dev workers list
+cargo run -- local migrate status
 ```
