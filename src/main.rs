@@ -19,9 +19,40 @@ use commands::storage::StorageCommand;
 use commands::workers::WorkersCommand;
 use config::{AliasConfig, Config, PlatformStorageConfig};
 
+const EXAMPLES: &str = color_print::cstr!(
+    r#"<bold><underline>Examples:</underline></bold>
+  <dim># Quick start</dim>
+  ow login                              <dim>Authenticate with the API</dim>
+  ow workers create my-api              <dim>Create a new worker</dim>
+  ow workers deploy my-api worker.ts    <dim>Deploy code to worker</dim>
+
+  <dim># Environment and bindings</dim>
+  ow env create prod                    <dim>Create an environment</dim>
+  ow kv create cache                    <dim>Create a KV namespace</dim>
+  ow env bind prod CACHE cache -t kv    <dim>Bind KV to environment</dim>
+  ow workers link my-api --env prod     <dim>Link environment to worker</dim>
+
+  <dim># Using aliases (for multiple backends)</dim>
+  ow alias list                         <dim>Show configured aliases</dim>
+  ow local workers list                 <dim>List workers using 'local' alias</dim>
+  ow prod workers list                  <dim>List workers using 'prod' alias</dim>
+
+  <dim># Upload with assets (SvelteKit, etc.)</dim>
+  ow workers upload my-app ./dist       <dim>Upload worker + assets folder</dim>
+"#
+);
+
 #[derive(Parser)]
 #[command(name = "ow")]
-#[command(author, version, about = "OpenWorkers CLI", long_about = None)]
+#[command(author, version)]
+#[command(about = "OpenWorkers CLI - Deploy and manage serverless workers")]
+#[command(
+    long_about = "OpenWorkers CLI - Deploy and manage serverless workers.\n\n\
+                  Commands can be prefixed with an alias name to target a specific backend:\n  \
+                  ow <alias> <command>       e.g., ow local workers list\n  \
+                  ow <command>               uses the default alias"
+)]
+#[command(after_help = EXAMPLES)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -29,74 +60,113 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage connection aliases
+    /// Manage connection aliases (API or database backends)
+    #[command(after_help = "Examples:\n  \
+        ow alias list                                  List all aliases\n  \
+        ow alias set prod --api https://api.example.com   Add API alias\n  \
+        ow alias set local --db postgres://... --user max Add DB alias\n  \
+        ow alias set-default prod                      Set default alias")]
     Alias {
         #[command(subcommand)]
         command: AliasCommand,
     },
 
-    /// Set API token for an alias
+    /// Authenticate and store API token for the current alias
+    #[command(after_help = "Examples:\n  \
+        ow login           Login to default alias\n  \
+        ow prod login      Login to 'prod' alias")]
     Login,
 
-    /// Database operations (requires db alias)
+    /// Direct database operations (requires db alias with --user)
+    #[command(after_help = "Examples:\n  \
+        ow local db migrate    Run migrations\n  \
+        ow local db seed       Seed initial data")]
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
 
-    /// Manage workers
+    /// Create, deploy, and manage workers
+    #[command(after_help = "Examples:\n  \
+        ow workers list                        List all workers\n  \
+        ow workers create my-api               Create worker 'my-api'\n  \
+        ow workers deploy my-api worker.ts     Deploy TypeScript code\n  \
+        ow workers upload my-app ./dist        Upload folder with assets\n  \
+        ow workers link my-api --env prod      Link to environment")]
     Workers {
         #[command(subcommand)]
         command: WorkersCommand,
     },
 
-    /// Manage environments (variables and secrets)
+    /// Manage environments with variables, secrets, and bindings
+    #[command(after_help = "Examples:\n  \
+        ow env list                            List environments\n  \
+        ow env create prod                     Create 'prod' environment\n  \
+        ow env set prod API_KEY sk-xxx -s      Set secret\n  \
+        ow env bind prod DB my-db -t database  Bind database\n  \
+        ow env bind prod KV cache -t kv        Bind KV namespace\n  \
+        ow env bind prod ASSETS storage -t assets  Bind storage for assets")]
     Env {
         #[command(subcommand)]
         command: EnvCommand,
     },
 
-    /// Manage storage configs (S3/R2 bindings)
+    /// Manage S3/R2 storage configurations for file storage
+    #[command(after_help = "Examples:\n  \
+        ow storage list                        List storage configs\n  \
+        ow storage create my-bucket --bucket name --endpoint https://...")]
     Storage {
         #[command(subcommand)]
         command: StorageCommand,
     },
 
-    /// Manage KV namespaces
+    /// Manage KV namespaces for key-value storage
+    #[command(after_help = "Examples:\n  \
+        ow kv list                             List KV namespaces\n  \
+        ow kv create cache                     Create 'cache' namespace")]
     Kv {
         #[command(subcommand)]
         command: KvCommand,
     },
 
-    /// Manage databases
+    /// Manage SQL databases
+    #[command(after_help = "Examples:\n  \
+        ow databases list                      List databases\n  \
+        ow databases create my-db              Create database")]
     Databases {
         #[command(subcommand)]
         command: DatabasesCommand,
     },
 
-    /// Configure platform storage for a DB alias (one-time setup)
+    /// Configure platform storage for asset uploads (one-time setup for DB aliases)
+    #[command(after_help = "Example:\n  \
+        ow local setup-storage \\\n    \
+          --endpoint https://xxx.r2.cloudflarestorage.com \\\n    \
+          --bucket my-assets \\\n    \
+          --access-key-id AKIA... \\\n    \
+          --secret-access-key ...")]
     SetupStorage {
-        /// S3 endpoint URL
+        /// S3-compatible endpoint URL (e.g., https://xxx.r2.cloudflarestorage.com)
         #[arg(long)]
         endpoint: String,
 
-        /// S3 bucket name
+        /// Bucket name
         #[arg(long)]
         bucket: String,
 
-        /// S3 access key ID
+        /// Access key ID
         #[arg(long)]
         access_key_id: String,
 
-        /// S3 secret access key
+        /// Secret access key
         #[arg(long)]
         secret_access_key: String,
 
-        /// S3 region
+        /// Region (default: auto)
         #[arg(long, default_value = "auto")]
         region: String,
 
-        /// Key prefix
+        /// Optional key prefix for all uploads
         #[arg(long)]
         prefix: Option<String>,
     },

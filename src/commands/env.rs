@@ -6,71 +6,84 @@ use colored::Colorize;
 
 #[derive(Subcommand)]
 pub enum EnvCommand {
-    /// List all environments
+    /// List all environments with their variable/binding counts
     #[command(alias = "ls")]
     List,
 
-    /// Get environment details
+    /// Show environment details including all variables and bindings
+    #[command(after_help = "Example:\n  ow env get production")]
     Get {
         /// Environment name
         name: String,
     },
 
-    /// Create a new environment
+    /// Create a new environment for organizing variables and bindings
+    #[command(after_help = "Examples:\n  \
+        ow env create production\n  \
+        ow env create staging -d \"Staging environment\"")]
     Create {
         /// Environment name
         name: String,
 
-        /// Environment description
+        /// Description of this environment's purpose
         #[arg(short, long)]
         description: Option<String>,
     },
 
-    /// Delete an environment
-    #[command(alias = "rm")]
+    /// Delete an environment and all its variables/bindings
+    #[command(alias = "rm", after_help = "Example:\n  ow env delete old-env")]
     Delete {
-        /// Environment name
+        /// Environment name to delete
         name: String,
     },
 
-    /// Set a variable or secret
+    /// Set a variable or secret in an environment
+    #[command(after_help = "Examples:\n  \
+        ow env set prod API_URL https://api.example.com\n  \
+        ow env set prod API_KEY sk-xxx --secret")]
     Set {
         /// Environment name
         env: String,
 
-        /// Variable key
+        /// Variable name (conventionally UPPER_SNAKE_CASE)
         key: String,
 
         /// Variable value
         value: String,
 
-        /// Mark as secret (value will be masked)
+        /// Store as secret (value is encrypted and masked in output)
         #[arg(short, long)]
         secret: bool,
     },
 
-    /// Remove a variable or secret
+    /// Remove a variable or secret from an environment
+    #[command(after_help = "Example:\n  ow env unset prod OLD_API_KEY")]
     Unset {
         /// Environment name
         env: String,
 
-        /// Variable key
+        /// Variable name to remove
         key: String,
     },
 
-    /// Bind a resource to an environment
+    /// Bind a resource (KV, database, storage) to an environment
+    #[command(after_help = "Examples:\n  \
+        ow env bind prod KV my-cache --type kv\n  \
+        ow env bind prod DB my-database --type database\n  \
+        ow env bind prod ASSETS my-storage --type assets\n  \
+        ow env bind prod FILES my-storage --type storage")]
     Bind {
         /// Environment name
         env: String,
 
-        /// Binding name (e.g. ASSETS, MY_KV, MY_DB)
+        /// Binding name (accessed as env.NAME in worker code)
         key: String,
 
-        /// Resource name to bind
+        /// Resource name to bind (must exist)
         resource: String,
 
-        /// Binding type
-        #[arg(short = 't', long, value_parser = ["assets", "storage", "kv", "database"])]
+        /// Binding type: assets, storage, kv, or database
+        #[arg(short = 't', long = "type", value_parser = ["assets", "storage", "kv", "database"])]
         binding_type: String,
     },
 }

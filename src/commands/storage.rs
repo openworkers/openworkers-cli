@@ -4,22 +4,30 @@ use colored::Colorize;
 
 #[derive(Subcommand)]
 pub enum StorageCommand {
-    /// List all storage configs
+    /// List all storage configurations
     #[command(alias = "ls")]
     List,
 
-    /// Get storage config details
+    /// Show storage configuration details
+    #[command(after_help = "Example:\n  ow storage get my-bucket")]
     Get {
-        /// Storage name
+        /// Storage configuration name
         name: String,
     },
 
-    /// Create a new storage config
+    /// Create a storage configuration for S3-compatible object storage
+    #[command(after_help = "Examples:\n  \
+        ow storage create my-assets\n  \
+        ow storage create my-bucket --provider s3 \\\n    \
+          --bucket my-bucket \\\n    \
+          --endpoint https://xxx.r2.cloudflarestorage.com \\\n    \
+          --access-key-id AKIA... \\\n    \
+          --secret-access-key ...")]
     Create {
-        /// Storage name
+        /// Storage configuration name
         name: String,
 
-        /// Provider: platform (default) or s3
+        /// Storage provider: platform (managed) or s3 (bring your own)
         #[arg(long, default_value = "platform")]
         provider: String,
 
@@ -35,31 +43,31 @@ pub enum StorageCommand {
         #[arg(long)]
         secret_access_key: Option<String>,
 
-        /// S3 endpoint URL
+        /// S3-compatible endpoint URL (e.g., R2, MinIO)
         #[arg(long)]
         endpoint: Option<String>,
 
-        /// S3 region
+        /// S3 region (default: auto)
         #[arg(long)]
         region: Option<String>,
 
-        /// Key prefix
+        /// Key prefix for all objects in this storage
         #[arg(long)]
         prefix: Option<String>,
 
-        /// Public URL for assets
+        /// Public URL prefix for serving assets (e.g., CDN URL)
         #[arg(long)]
         public_url: Option<String>,
 
-        /// Description
+        /// Description of this storage configuration
         #[arg(short, long)]
         description: Option<String>,
     },
 
-    /// Delete a storage config
-    #[command(alias = "rm")]
+    /// Delete a storage configuration
+    #[command(alias = "rm", after_help = "Example:\n  ow storage delete old-bucket")]
     Delete {
-        /// Storage name
+        /// Storage configuration name to delete
         name: String,
     },
 }

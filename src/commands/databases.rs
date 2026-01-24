@@ -4,34 +4,40 @@ use colored::Colorize;
 
 #[derive(Subcommand)]
 pub enum DatabasesCommand {
-    /// List all databases
+    /// List all database configurations
     #[command(alias = "ls")]
     List,
 
-    /// Get database details
+    /// Show database configuration details
+    #[command(after_help = "Example:\n  ow databases get my-db")]
     Get {
         /// Database name
         name: String,
     },
 
-    /// Create a new database
+    /// Create a database configuration for SQL access from workers
+    #[command(after_help = "Examples:\n  \
+        ow databases create my-db\n  \
+        ow databases create my-db --provider postgres \\\n    \
+          --connection-string postgres://user:pass@host/db\n  \
+        ow databases create analytics --max-rows 5000 --timeout 60")]
     Create {
-        /// Database name
+        /// Database configuration name
         name: String,
 
-        /// Provider: platform (default) or postgres
+        /// Database provider: platform (managed) or postgres (bring your own)
         #[arg(long, default_value = "platform")]
         provider: String,
 
-        /// Postgres connection string (required for postgres provider)
+        /// PostgreSQL connection string (required for postgres provider)
         #[arg(long)]
         connection_string: Option<String>,
 
-        /// Description
+        /// Description of this database
         #[arg(short, long)]
         description: Option<String>,
 
-        /// Maximum rows per query (default: 1000)
+        /// Maximum rows returned per query (default: 1000)
         #[arg(long)]
         max_rows: Option<i32>,
 
@@ -40,10 +46,10 @@ pub enum DatabasesCommand {
         timeout: Option<i32>,
     },
 
-    /// Delete a database
-    #[command(alias = "rm")]
+    /// Delete a database configuration
+    #[command(alias = "rm", after_help = "Example:\n  ow databases delete old-db")]
     Delete {
-        /// Database name
+        /// Database name to delete
         name: String,
     },
 }

@@ -8,26 +8,30 @@ pub enum KvCommand {
     #[command(alias = "ls")]
     List,
 
-    /// Get KV namespace details
+    /// Show KV namespace details
+    #[command(after_help = "Example:\n  ow kv get my-cache")]
     Get {
         /// KV namespace name
         name: String,
     },
 
-    /// Create a new KV namespace
+    /// Create a new KV namespace for key-value storage
+    #[command(after_help = "Examples:\n  \
+        ow kv create my-cache\n  \
+        ow kv create sessions -d \"User sessions\"")]
     Create {
         /// KV namespace name
         name: String,
 
-        /// Description
+        /// Description of what this namespace stores
         #[arg(short, long)]
         description: Option<String>,
     },
 
-    /// Delete a KV namespace
-    #[command(alias = "rm")]
+    /// Delete a KV namespace and all its data
+    #[command(alias = "rm", after_help = "Example:\n  ow kv delete old-cache")]
     Delete {
-        /// KV namespace name
+        /// KV namespace name to delete
         name: String,
     },
 }

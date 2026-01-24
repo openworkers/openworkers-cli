@@ -4,48 +4,53 @@ use colored::Colorize;
 
 #[derive(Subcommand)]
 pub enum AliasCommand {
-    /// Add or update an alias
+    /// Configure a new alias for API or direct database access
+    #[command(after_help = "Examples:\n  \
+        ow alias set prod --api https://dash.openworkers.com\n  \
+        ow alias set local --db postgres://localhost/ow --user admin@example.com\n  \
+        ow alias set dev --api https://localhost:8080 --insecure")]
     Set {
-        /// Alias name
+        /// Alias name (used as prefix: ow <alias> workers list)
         name: String,
 
-        /// API URL (for API backend)
+        /// API URL for HTTP backend (e.g., https://dash.openworkers.com)
         #[arg(long, conflicts_with = "db")]
         api: Option<String>,
 
-        /// API token
+        /// API token (obtained via ow login)
         #[arg(long, requires = "api")]
         token: Option<String>,
 
-        /// Accept invalid TLS certificates (for dev environments)
+        /// Accept invalid TLS certificates (for local development)
         #[arg(long, requires = "api")]
         insecure: bool,
 
-        /// Database URL (for DB backend)
+        /// PostgreSQL URL for direct database access
         #[arg(long, conflicts_with = "api")]
         db: Option<String>,
 
-        /// User email or username to operate as (for DB backend)
+        /// User email to operate as (required for db backend)
         #[arg(long, requires = "db")]
         user: Option<String>,
 
-        /// Overwrite existing alias
+        /// Overwrite existing alias without confirmation
         #[arg(short, long)]
         force: bool,
     },
 
-    /// List all configured aliases
+    /// List all configured aliases (* = default)
     #[command(alias = "ls")]
     List,
 
-    /// Remove an alias
-    #[command(alias = "rm")]
+    /// Remove an alias from configuration
+    #[command(alias = "rm", after_help = "Example:\n  ow alias remove old-prod")]
     Remove {
         /// Alias name to remove
         name: String,
     },
 
-    /// Set the default alias
+    /// Set the default alias (used when no alias prefix is given)
+    #[command(after_help = "Example:\n  ow alias set-default prod")]
     SetDefault {
         /// Alias name to set as default
         name: String,

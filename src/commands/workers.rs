@@ -7,66 +7,82 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum WorkersCommand {
-    /// List all workers
+    /// List all workers with their version and description
     #[command(alias = "ls")]
     List,
 
-    /// Get worker details
+    /// Show detailed information about a worker
+    #[command(after_help = "Example:\n  ow workers get my-api")]
     Get {
         /// Worker name
         name: String,
     },
 
-    /// Create a new worker
+    /// Create a new worker (available at https://<name>.workers.rocks)
+    #[command(after_help = "Examples:\n  \
+        ow workers create my-api\n  \
+        ow workers create my-api -d \"REST API for users\"\n  \
+        ow workers create my-api --language javascript")]
     Create {
-        /// Worker name
+        /// Worker name (becomes part of the URL)
         name: String,
 
-        /// Worker description
+        /// Short description of what this worker does
         #[arg(short, long)]
         description: Option<String>,
 
-        /// Language (javascript or typescript)
+        /// Source language: javascript or typescript
         #[arg(short, long, default_value = "typescript")]
         language: String,
     },
 
-    /// Delete a worker
-    #[command(alias = "rm")]
+    /// Delete a worker permanently
+    #[command(alias = "rm", after_help = "Example:\n  ow workers delete my-api")]
     Delete {
-        /// Worker name
+        /// Worker name to delete
         name: String,
     },
 
-    /// Deploy code to a worker
+    /// Deploy a single source file to a worker
+    #[command(after_help = "Examples:\n  \
+        ow workers deploy my-api worker.ts\n  \
+        ow workers deploy my-api dist/worker.js -m \"Fix auth bug\"")]
     Deploy {
-        /// Worker name
+        /// Worker name to deploy to
         name: String,
 
-        /// Path to the source file (.js, .ts, or .wasm)
+        /// Source file (.js, .ts, or .wasm)
         file: PathBuf,
 
-        /// Deployment message
+        /// Deployment message (shown in version history)
         #[arg(short, long)]
         message: Option<String>,
     },
 
-    /// Link an environment to a worker
+    /// Link an environment to a worker (for bindings and secrets)
+    #[command(after_help = "Examples:\n  \
+        ow workers link my-api --env production\n  \
+        ow workers link my-api -e staging")]
     Link {
         /// Worker name
         name: String,
 
-        /// Environment name
+        /// Environment name to link
         #[arg(short, long)]
         env: String,
     },
 
-    /// Upload a zip archive or folder with worker.js and assets
+    /// Upload a folder with worker.js and static assets
+    #[command(after_help = "Examples:\n  \
+        ow workers upload my-app ./dist\n  \
+        ow workers upload my-app ./build.zip\n\n\
+        Note: Worker must have an ASSETS binding configured.\n\
+        The folder should contain worker.js at the root.")]
     Upload {
-        /// Worker name
+        /// Worker name to upload to
         name: String,
 
-        /// Path to the zip file or folder
+        /// Path to folder or .zip archive containing worker.js and assets
         path: PathBuf,
     },
 }
