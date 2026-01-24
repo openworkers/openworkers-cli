@@ -8,7 +8,7 @@ use sqlx::{PgPool, Row};
 static MIGRATOR: Migrator = sqlx::migrate!();
 
 #[derive(Debug, thiserror::Error)]
-pub enum DbError {
+pub enum MigrateError {
     #[error("Config error: {0}")]
     Config(#[from] ConfigError),
 
@@ -18,7 +18,7 @@ pub enum DbError {
     #[error("Migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
 
-    #[error("Alias '{0}' is not a database alias. Use --db or configure a db alias.")]
+    #[error("Alias '{0}' is not a database alias. Use --db when creating the alias.")]
     NotDbAlias(String),
 
     #[error("No alias specified and no default alias configured")]
@@ -26,34 +26,42 @@ pub enum DbError {
 }
 
 #[derive(Subcommand)]
-pub enum DbCommand {
-    /// Run pending migrations
-    Migrate,
+pub enum MigrateCommand {
+    /// Run all pending migrations
+    #[command(after_help = "Example:\n  ow local migrate run")]
+    Run,
 
-    /// Show migration status
+    /// Show which migrations are applied or pending
+    #[command(after_help = "Example:\n  ow local migrate status")]
     Status,
 
-    /// Mark all migrations as applied without running them (for existing databases)
+    /// Mark all migrations as applied without running them
+    #[command(
+        after_help = "Use this for existing databases that already have the schema.\n\n\
+        Example:\n  ow local migrate baseline"
+    )]
     Baseline,
 }
 
-impl DbCommand {
-    pub async fn run(self, alias: Option<String>) -> Result<(), DbError> {
+impl MigrateCommand {
+    pub async fn run(self, alias: Option<String>) -> Result<(), MigrateError> {
         let database_url = resolve_database_url(alias)?;
         let pool = connect(&database_url).await?;
 
         match self {
-            Self::Migrate => cmd_migrate(&pool).await,
+            Self::Run => cmd_run(&pool).await,
             Self::Status => cmd_status(&pool).await,
             Self::Baseline => cmd_baseline(&pool).await,
         }
     }
 }
 
-fn resolve_database_url(alias: Option<String>) -> Result<String, DbError> {
+fn resolve_database_url(alias: Option<String>) -> Result<String, MigrateError> {
     let config = Config::load()?;
 
-    let alias_name = alias.or(config.default.clone()).ok_or(DbError::NoAlias)?;
+    let alias_name = alias
+        .or(config.default.clone())
+        .ok_or(MigrateError::NoAlias)?;
 
     let alias_config = config
         .get_alias(&alias_name)
@@ -61,11 +69,11 @@ fn resolve_database_url(alias: Option<String>) -> Result<String, DbError> {
 
     match alias_config {
         AliasConfig::Db { database_url, .. } => Ok(database_url.clone()),
-        AliasConfig::Api { .. } => Err(DbError::NotDbAlias(alias_name)),
+        AliasConfig::Api { .. } => Err(MigrateError::NotDbAlias(alias_name)),
     }
 }
 
-async fn connect(database_url: &str) -> Result<PgPool, DbError> {
+async fn connect(database_url: &str) -> Result<PgPool, MigrateError> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -74,7 +82,7 @@ async fn connect(database_url: &str) -> Result<PgPool, DbError> {
     Ok(pool)
 }
 
-async fn cmd_migrate(pool: &PgPool) -> Result<(), DbError> {
+async fn cmd_run(pool: &PgPool) -> Result<(), MigrateError> {
     println!("Running migrations...\n");
 
     MIGRATOR.run(pool).await?;
@@ -84,7 +92,7 @@ async fn cmd_migrate(pool: &PgPool) -> Result<(), DbError> {
     Ok(())
 }
 
-async fn cmd_status(pool: &PgPool) -> Result<(), DbError> {
+async fn cmd_status(pool: &PgPool) -> Result<(), MigrateError> {
     // Get applied migrations from DB
     let applied: Vec<(i64, Vec<u8>)> =
         sqlx::query("SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
@@ -135,14 +143,14 @@ async fn cmd_status(pool: &PgPool) -> Result<(), DbError> {
         println!(
             "{} pending migration(s). Run '{}' to apply.",
             pending_count.to_string().yellow(),
-            "ow db migrate".cyan()
+            "ow migrate run".cyan()
         );
     }
 
     Ok(())
 }
 
-async fn cmd_baseline(pool: &PgPool) -> Result<(), DbError> {
+async fn cmd_baseline(pool: &PgPool) -> Result<(), MigrateError> {
     // Create _sqlx_migrations table if it doesn't exist
     sqlx::query(
         r#"
@@ -170,7 +178,7 @@ async fn cmd_baseline(pool: &PgPool) -> Result<(), DbError> {
             "Warning:".yellow().bold(),
             count
         );
-        println!("Use '{}' to check status.", "ow db status".cyan());
+        println!("Use '{}' to check status.", "ow migrate status".cyan());
         return Ok(());
     }
 

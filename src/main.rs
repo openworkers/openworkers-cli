@@ -12,9 +12,9 @@ use backend::api::ApiBackend;
 use backend::db::DbBackend;
 use commands::alias::AliasCommand;
 use commands::databases::DatabasesCommand;
-use commands::db::DbCommand;
 use commands::env::EnvCommand;
 use commands::kv::KvCommand;
+use commands::migrate::MigrateCommand;
 use commands::storage::StorageCommand;
 use commands::workers::WorkersCommand;
 use config::{AliasConfig, Config, PlatformStorageConfig};
@@ -77,13 +77,13 @@ enum Commands {
         ow prod login      Login to 'prod' alias")]
     Login,
 
-    /// Direct database operations (requires db alias with --user)
+    /// Run database migrations (requires db alias)
     #[command(after_help = "Examples:\n  \
-        ow local db migrate    Run migrations\n  \
-        ow local db seed       Seed initial data")]
-    Db {
+        ow local migrate status    Show migration status\n  \
+        ow local migrate run       Run pending migrations")]
+    Migrate {
         #[command(subcommand)]
-        command: DbCommand,
+        command: MigrateCommand,
     },
 
     /// Create, deploy, and manage workers
@@ -189,7 +189,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
     let known_commands = [
         "alias",
         "login",
-        "db",
+        "migrate",
         "workers",
         "env",
         "storage",
@@ -469,7 +469,7 @@ async fn main() {
                 .ok_or("No alias specified and no default configured".to_string())?;
             commands::login::run(&alias_name).map_err(|e| e.to_string())
         })(),
-        Commands::Db { command } => command.run(alias).await.map_err(|e| e.to_string()),
+        Commands::Migrate { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Workers { command } => run_workers_command(alias, command).await,
         Commands::Env { command } => run_env_command(alias, command).await,
         Commands::Storage { command } => run_storage_command(alias, command).await,

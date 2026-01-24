@@ -41,6 +41,23 @@ ow alias rm old-alias
 
 On first run, a `default` alias pointing to `https://dash.openworkers.com/api/v1` is created as default.
 
+## Command Shortcuts
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `workers list` | `workers ls` | List all workers |
+| `workers delete` | `workers rm` | Delete a worker |
+| `env list` | `env ls` | List environments |
+| `env delete` | `env rm` | Delete environment |
+| `kv list` | `kv ls` | List KV namespaces |
+| `kv delete` | `kv rm` | Delete KV namespace |
+| `storage list` | `storage ls` | List storage configs |
+| `storage delete` | `storage rm` | Delete storage config |
+| `databases list` | `databases ls` | List databases |
+| `databases delete` | `databases rm` | Delete database |
+| `alias list` | `alias ls` | List aliases |
+| `alias remove` | `alias rm` | Remove alias |
+
 ## Commands
 
 ### Login
@@ -170,19 +187,19 @@ ow databases create my-pg --provider postgres \
 ow databases delete my-db
 ```
 
-### Infra
+### Migrations
 
-Database migrations (requires `db` type alias).
+Database schema migrations (requires `db` type alias).
 
 ```bash
-# Run pending migrations
-ow infra db migrate
-
 # Check migration status
-ow infra db status
+ow local migrate status
+
+# Run pending migrations
+ow local migrate run
 
 # Baseline existing database (mark all migrations as applied)
-ow infra db baseline
+ow local migrate baseline
 ```
 
 ### Using Aliases
@@ -194,7 +211,7 @@ ow workers list
 # Use specific alias as first argument
 ow prod workers list
 ow dev workers get my-api
-ow infra db migrate
+ow local migrate run
 
 # Or use --alias flag
 ow --alias prod workers list
@@ -217,9 +234,10 @@ ow --alias prod workers list
       "url": "http://localhost:7000",
       "token": "ow_xxx"
     },
-    "infra": {
+    "local": {
       "type": "db",
-      "database_url": "postgres://user:pass@host/db"
+      "database_url": "postgres://user:pass@host/db",
+      "user": "admin@example.com"
     }
   }
 }
