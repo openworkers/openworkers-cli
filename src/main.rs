@@ -87,52 +87,73 @@ enum Commands {
     },
 
     /// Create, deploy, and manage workers
-    #[command(after_help = "Examples:\n  \
+    #[command(
+        visible_alias = "w",
+        alias = "worker",
+        after_help = "Examples:\n  \
         ow workers list                        List all workers\n  \
         ow workers create my-api               Create worker 'my-api'\n  \
         ow workers deploy my-api worker.ts     Deploy TypeScript code\n  \
         ow workers upload my-app ./dist        Upload folder with assets\n  \
-        ow workers link my-api --env prod      Link to environment")]
+        ow workers link my-api --env prod      Link to environment"
+    )]
     Workers {
         #[command(subcommand)]
         command: WorkersCommand,
     },
 
     /// Manage environments with variables, secrets, and bindings
-    #[command(after_help = "Examples:\n  \
+    #[command(
+        visible_alias = "e",
+        alias = "envs",
+        alias = "environment",
+        alias = "environments",
+        after_help = "Examples:\n  \
         ow env list                            List environments\n  \
         ow env create prod                     Create 'prod' environment\n  \
         ow env set prod API_KEY sk-xxx -s      Set secret\n  \
         ow env bind prod DB my-db -t database  Bind database\n  \
         ow env bind prod KV cache -t kv        Bind KV namespace\n  \
-        ow env bind prod ASSETS storage -t assets  Bind storage for assets")]
+        ow env bind prod ASSETS storage -t assets  Bind storage for assets"
+    )]
     Env {
         #[command(subcommand)]
         command: EnvCommand,
     },
 
     /// Manage S3/R2 storage configurations for file storage
-    #[command(after_help = "Examples:\n  \
+    #[command(
+        visible_alias = "s",
+        after_help = "Examples:\n  \
         ow storage list                        List storage configs\n  \
-        ow storage create my-bucket --bucket name --endpoint https://...")]
+        ow storage create my-bucket --bucket name --endpoint https://..."
+    )]
     Storage {
         #[command(subcommand)]
         command: StorageCommand,
     },
 
     /// Manage KV namespaces for key-value storage
-    #[command(after_help = "Examples:\n  \
+    #[command(
+        visible_alias = "k",
+        after_help = "Examples:\n  \
         ow kv list                             List KV namespaces\n  \
-        ow kv create cache                     Create 'cache' namespace")]
+        ow kv create cache                     Create 'cache' namespace"
+    )]
     Kv {
         #[command(subcommand)]
         command: KvCommand,
     },
 
     /// Manage SQL databases
-    #[command(after_help = "Examples:\n  \
+    #[command(
+        visible_alias = "d",
+        alias = "db",
+        alias = "database",
+        after_help = "Examples:\n  \
         ow databases list                      List databases\n  \
-        ow databases create my-db              Create database")]
+        ow databases create my-db              Create database"
+    )]
     Databases {
         #[command(subcommand)]
         command: DatabasesCommand,
@@ -187,6 +208,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
     }
 
     let known_commands = [
+        // Main commands
         "alias",
         "login",
         "migrate",
@@ -196,6 +218,20 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "kv",
         "databases",
         "setup-storage",
+        // Short aliases
+        "w",
+        "e",
+        "s",
+        "k",
+        "d",
+        // Singular variants (for flexibility)
+        "worker",
+        "envs",
+        "environment",
+        "environments",
+        "db",
+        "database",
+        // Help flags
         "help",
         "--help",
         "-h",

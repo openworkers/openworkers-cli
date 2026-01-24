@@ -43,20 +43,22 @@ On first run, a `default` alias pointing to `https://dash.openworkers.com/api/v1
 
 ## Command Shortcuts
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `workers list` | `workers ls` | List all workers |
-| `workers delete` | `workers rm` | Delete a worker |
-| `env list` | `env ls` | List environments |
-| `env delete` | `env rm` | Delete environment |
-| `kv list` | `kv ls` | List KV namespaces |
-| `kv delete` | `kv rm` | Delete KV namespace |
-| `storage list` | `storage ls` | List storage configs |
-| `storage delete` | `storage rm` | Delete storage config |
-| `databases list` | `databases ls` | List databases |
-| `databases delete` | `databases rm` | Delete database |
-| `alias list` | `alias ls` | List aliases |
-| `alias remove` | `alias rm` | Remove alias |
+Resources:
+
+| Command     | Short |
+| ----------- | ----- |
+| `workers`   | `w`   |
+| `env`       | `e`   |
+| `storage`   | `s`   |
+| `kv`        | `k`   |
+| `databases` | `d`   |
+
+Operations:
+
+| Command  | Short |
+| -------- | ----- |
+| `list`   | `ls`  |
+| `delete` | `rm`  |
 
 ## Commands
 
