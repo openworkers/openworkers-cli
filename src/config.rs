@@ -25,6 +25,23 @@ pub enum ConfigError {
     AliasExists(String),
 }
 
+/// Platform storage configuration for DB aliases
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformStorageConfig {
+    pub endpoint: String,
+    pub bucket: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    #[serde(default = "default_region")]
+    pub region: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+}
+
+fn default_region() -> String {
+    "auto".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AliasConfig {
@@ -37,6 +54,12 @@ pub enum AliasConfig {
     },
     Db {
         database_url: String,
+        /// User email or username to operate as
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        /// Platform-provided storage credentials
+        #[serde(skip_serializing_if = "Option::is_none")]
+        storage: Option<PlatformStorageConfig>,
     },
 }
 
@@ -49,9 +72,15 @@ impl AliasConfig {
         }
     }
 
-    pub fn db(database_url: impl Into<String>) -> Self {
+    pub fn db(
+        database_url: impl Into<String>,
+        user: Option<String>,
+        storage: Option<PlatformStorageConfig>,
+    ) -> Self {
         Self::Db {
             database_url: database_url.into(),
+            user,
+            storage,
         }
     }
 
@@ -216,11 +245,11 @@ mod tests {
 
     #[test]
     fn test_alias_config_db() {
-        let alias = AliasConfig::db("postgres://user:pass@localhost/db");
+        let alias = AliasConfig::db("postgres://user:pass@localhost/db", None, None);
 
         assert_eq!(alias.type_name(), "db");
 
-        if let AliasConfig::Db { database_url } = alias {
+        if let AliasConfig::Db { database_url, .. } = alias {
             assert_eq!(database_url, "postgres://user:pass@localhost/db");
         } else {
             panic!("Expected Db variant");
@@ -297,7 +326,11 @@ mod tests {
     fn test_remove_alias() {
         let mut config = Config::default();
         config
-            .set_alias("test", AliasConfig::db("postgres://localhost/test"), false)
+            .set_alias(
+                "test",
+                AliasConfig::db("postgres://localhost/test", None, None),
+                false,
+            )
             .unwrap();
 
         let removed = config.remove_alias("test").unwrap();
@@ -373,14 +406,14 @@ mod tests {
 
     #[test]
     fn test_json_serialization_db() {
-        let alias = AliasConfig::db("postgres://localhost/db");
+        let alias = AliasConfig::db("postgres://localhost/db", None, None);
 
         let json = serde_json::to_string(&alias).unwrap();
         let parsed: AliasConfig = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.type_name(), "db");
 
-        if let AliasConfig::Db { database_url } = parsed {
+        if let AliasConfig::Db { database_url, .. } = parsed {
             assert_eq!(database_url, "postgres://localhost/db");
         }
     }
@@ -389,7 +422,11 @@ mod tests {
     fn test_json_serialization_config() {
         let mut config = Config::default();
         config
-            .set_alias("infra", AliasConfig::db("postgres://localhost/db"), false)
+            .set_alias(
+                "infra",
+                AliasConfig::db("postgres://localhost/db", None, None),
+                false,
+            )
             .unwrap();
 
         let json = serde_json::to_string_pretty(&config).unwrap();

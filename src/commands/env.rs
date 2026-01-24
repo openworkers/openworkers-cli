@@ -111,19 +111,39 @@ async fn cmd_list<B: Backend>(backend: &B) -> Result<(), BackendError> {
     println!("{}", "─".repeat(60));
 
     for env in environments {
-        let vars_count = env.values.len();
+        let vars_count = env.values.iter().filter(|v| v.value_type == "var").count();
         let secrets_count = env
             .values
             .iter()
             .filter(|v| v.value_type == "secret")
             .count();
+        let bindings_count = env
+            .values
+            .iter()
+            .filter(|v| !matches!(v.value_type.as_str(), "var" | "secret"))
+            .count();
 
-        println!(
-            "  {:30} {} vars, {} secrets",
-            env.name.bold(),
-            vars_count - secrets_count,
-            secrets_count
-        );
+        let mut parts = Vec::new();
+
+        if vars_count > 0 {
+            parts.push(format!("{} vars", vars_count));
+        }
+
+        if secrets_count > 0 {
+            parts.push(format!("{} secrets", secrets_count));
+        }
+
+        if bindings_count > 0 {
+            parts.push(format!("{} bindings", bindings_count));
+        }
+
+        let summary = if parts.is_empty() {
+            "empty".dimmed().to_string()
+        } else {
+            parts.join(", ")
+        };
+
+        println!("  {:30} {}", env.name.bold(), summary);
     }
 
     Ok(())
@@ -153,14 +173,18 @@ async fn cmd_get<B: Backend>(backend: &B, name: &str) -> Result<(), BackendError
 
     if !env.values.is_empty() {
         println!();
-        println!("{}", "Variables".bold());
+        println!("{}", "Bindings".bold());
         println!("{}", "─".repeat(40));
 
         for val in &env.values {
-            let type_badge = if val.value_type == "secret" {
-                "[secret]".yellow()
-            } else {
-                "[var]".dimmed()
+            let type_badge = match val.value_type.as_str() {
+                "secret" => "[secret]".yellow(),
+                "var" => "[var]".dimmed(),
+                "kv" => "[kv]".cyan(),
+                "assets" => "[assets]".green(),
+                "storage" => "[storage]".blue(),
+                "database" => "[database]".magenta(),
+                _ => format!("[{}]", val.value_type).dimmed(),
             };
 
             println!("  {} {} = {}", type_badge, val.key.bold(), val.value);

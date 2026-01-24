@@ -4,6 +4,7 @@ use super::{
     EnvironmentValue, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
     UploadResult, UploadWorkerInfo, UploadedCounts, Worker,
 };
+use crate::config::PlatformStorageConfig;
 use crate::s3::{S3Client, S3Config, get_mime_type};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -13,23 +14,38 @@ use zip::ZipArchive;
 pub struct DbBackend {
     pool: PgPool,
     user_id: uuid::Uuid,
+    platform_storage: Option<PlatformStorageConfig>,
 }
 
 impl DbBackend {
-    pub async fn new(pool: PgPool) -> Result<Self, BackendError> {
-        // Get or create admin user on initialization
-        let user_id: uuid::Uuid = sqlx::query_scalar(
-            r#"
-            INSERT INTO users (id, username, created_at, updated_at)
-            VALUES (gen_random_uuid(), 'cli-admin', now(), now())
-            ON CONFLICT (username) DO UPDATE SET username = users.username
-            RETURNING id
-            "#,
-        )
-        .fetch_one(&pool)
-        .await?;
+    pub async fn new(
+        pool: PgPool,
+        username: Option<String>,
+        platform_storage: Option<PlatformStorageConfig>,
+    ) -> Result<Self, BackendError> {
+        let username = username.ok_or_else(|| {
+            BackendError::Api(
+                "No user configured for this DB alias. Use 'ow alias set <name> --db <url> --user <username>' to set a user.".to_string(),
+            )
+        })?;
 
-        Ok(Self { pool, user_id })
+        // Look up user by username
+        let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+            .bind(&username)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| {
+                BackendError::NotFound(format!(
+                    "User '{}' not found. Create an account first via the dashboard.",
+                    username
+                ))
+            })?;
+
+        Ok(Self {
+            pool,
+            user_id,
+            platform_storage,
+        })
     }
 
     async fn get_environment_values(
@@ -66,10 +82,12 @@ impl Backend for DbBackend {
     async fn list_workers(&self) -> Result<Vec<Worker>, BackendError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, name, "desc", current_version, created_at, updated_at
-            FROM workers
-            WHERE user_id = $1
-            ORDER BY name
+            SELECT w.id, w.name, w."desc", w.current_version, w.created_at, w.updated_at,
+                   e.id as env_id, e.name as env_name
+            FROM workers w
+            LEFT JOIN environments e ON e.id = w.environment_id
+            WHERE w.user_id = $1
+            ORDER BY w.name
             "#,
         )
         .bind(self.user_id)
@@ -78,13 +96,26 @@ impl Backend for DbBackend {
 
         let workers = rows
             .iter()
-            .map(|row| Worker {
-                id: row.get::<uuid::Uuid, _>("id").to_string(),
-                name: row.get("name"),
-                description: row.get("desc"),
-                current_version: row.get("current_version"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
+            .map(|row| {
+                let env_id: Option<uuid::Uuid> = row.get("env_id");
+                let env_name: Option<String> = row.get("env_name");
+                let environment =
+                    env_id
+                        .zip(env_name)
+                        .map(|(id, name)| super::WorkerEnvironmentRef {
+                            id: id.to_string(),
+                            name,
+                        });
+
+                Worker {
+                    id: row.get::<uuid::Uuid, _>("id").to_string(),
+                    name: row.get("name"),
+                    description: row.get("desc"),
+                    current_version: row.get("current_version"),
+                    environment,
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                }
             })
             .collect();
 
@@ -94,9 +125,11 @@ impl Backend for DbBackend {
     async fn get_worker(&self, name: &str) -> Result<Worker, BackendError> {
         let row = sqlx::query(
             r#"
-            SELECT id, name, "desc", current_version, created_at, updated_at
-            FROM workers
-            WHERE name = $1 AND user_id = $2
+            SELECT w.id, w.name, w."desc", w.current_version, w.created_at, w.updated_at,
+                   e.id as env_id, e.name as env_name
+            FROM workers w
+            LEFT JOIN environments e ON e.id = w.environment_id
+            WHERE w.name = $1 AND w.user_id = $2
             "#,
         )
         .bind(name)
@@ -105,11 +138,21 @@ impl Backend for DbBackend {
         .await?
         .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
 
+        let env_id: Option<uuid::Uuid> = row.get("env_id");
+        let env_name: Option<String> = row.get("env_name");
+        let environment = env_id
+            .zip(env_name)
+            .map(|(id, name)| super::WorkerEnvironmentRef {
+                id: id.to_string(),
+                name,
+            });
+
         Ok(Worker {
             id: row.get::<uuid::Uuid, _>("id").to_string(),
             name: row.get("name"),
             description: row.get("desc"),
             current_version: row.get("current_version"),
+            environment,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -136,6 +179,7 @@ impl Backend for DbBackend {
             name: row.get("name"),
             description: row.get("desc"),
             current_version: row.get("current_version"),
+            environment: None,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -186,30 +230,30 @@ impl Backend for DbBackend {
             None
         };
 
-        let row = sqlx::query(
+        let result = sqlx::query(
             r#"
             UPDATE workers
             SET environment_id = COALESCE($2, environment_id),
                 updated_at = now()
             WHERE name = $1 AND user_id = $3
-            RETURNING id, name, "desc", current_version, created_at, updated_at
+            RETURNING id
             "#,
         )
         .bind(name)
         .bind(env_id)
         .bind(self.user_id)
         .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", name)))?;
+        .await?;
 
-        Ok(Worker {
-            id: row.get::<uuid::Uuid, _>("id").to_string(),
-            name: row.get("name"),
-            description: row.get("desc"),
-            current_version: row.get("current_version"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-        })
+        if result.is_none() {
+            return Err(BackendError::NotFound(format!(
+                "Worker '{}' not found",
+                name
+            )));
+        }
+
+        // Fetch updated worker with environment info
+        self.get_worker(name).await
     }
 
     async fn deploy_worker(
@@ -284,11 +328,10 @@ impl Backend for DbBackend {
             .parse()
             .map_err(|_| BackendError::Api(format!("Invalid worker ID: {}", worker.id)))?;
 
-        // 2. Get ASSETS binding for this worker
+        // 2. Check for ASSETS binding (like API does)
         let assets_binding = sqlx::query(
             r#"
             SELECT
-                sc.id as storage_config_id,
                 sc.bucket,
                 sc.prefix,
                 sc.access_key_id,
@@ -298,11 +341,12 @@ impl Backend for DbBackend {
             FROM workers w
             JOIN environment_values ev ON ev.environment_id = w.environment_id
             JOIN storage_configs sc ON sc.id = ev.value::uuid
-            WHERE w.id = $1 AND ev.type = 'assets'
+            WHERE w.id = $1 AND w.user_id = $2 AND ev.type = 'assets'
             LIMIT 1
             "#,
         )
         .bind(worker_id)
+        .bind(self.user_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| {
@@ -311,17 +355,22 @@ impl Backend for DbBackend {
             )
         })?;
 
+        // 3. Get storage credentials from binding, with platform endpoint as fallback
         let bucket: String = assets_binding.get("bucket");
         let prefix: Option<String> = assets_binding.get("prefix");
         let access_key_id: String = assets_binding.get("access_key_id");
         let secret_access_key: String = assets_binding.get("secret_access_key");
-        let endpoint: Option<String> = assets_binding.get("endpoint");
-        let region: Option<String> = assets_binding.get("region");
+        let region: String = assets_binding
+            .get::<Option<String>, _>("region")
+            .unwrap_or_else(|| "auto".to_string());
 
-        let endpoint = endpoint
+        // Use binding's endpoint, or fall back to platform storage endpoint
+        let binding_endpoint: Option<String> = assets_binding.get("endpoint");
+        let endpoint = binding_endpoint
+            .or_else(|| self.platform_storage.as_ref().map(|ps| ps.endpoint.clone()))
             .ok_or_else(|| BackendError::Api("Storage endpoint not configured".to_string()))?;
 
-        // 3. Extract zip
+        // 4. Extract zip
         let cursor = std::io::Cursor::new(zip_data);
         let mut archive = ZipArchive::new(cursor)
             .map_err(|e| BackendError::Api(format!("Failed to read zip archive: {}", e)))?;
@@ -389,7 +438,7 @@ impl Backend for DbBackend {
             BackendError::Api("No worker.js or worker.ts found in zip archive".to_string())
         })?;
 
-        // 4. Update worker script in DB
+        // 5. Update worker script in DB
         let script_bytes = script.as_bytes();
         let mut hasher = Sha256::new();
         hasher.update(script_bytes);
@@ -426,13 +475,13 @@ impl Backend for DbBackend {
             .execute(&self.pool)
             .await?;
 
-        // 5. Upload assets to S3
+        // 6. Upload assets to S3
         let s3_client = S3Client::new(S3Config {
             bucket,
             endpoint,
             access_key_id,
             secret_access_key,
-            region: region.unwrap_or_else(|| "auto".to_string()),
+            region,
             prefix,
         });
 

@@ -61,13 +61,13 @@ pub enum WorkersCommand {
         env: String,
     },
 
-    /// Upload a zip archive with worker.js and assets
+    /// Upload a zip archive or folder with worker.js and assets
     Upload {
         /// Worker name
         name: String,
 
-        /// Path to the zip file
-        file: PathBuf,
+        /// Path to the zip file or folder
+        path: PathBuf,
     },
 }
 
@@ -88,7 +88,7 @@ impl WorkersCommand {
                 message,
             } => cmd_deploy(backend, &name, file, message).await,
             Self::Link { name, env } => cmd_link(backend, &name, &env).await,
-            Self::Upload { name, file } => cmd_upload(backend, &name, file).await,
+            Self::Upload { name, path } => cmd_upload(backend, &name, path).await,
         }
     }
 }
@@ -168,6 +168,10 @@ fn print_worker(worker: &Worker) {
 
     if let Some(desc) = &worker.description {
         println!("{:12} {}", "Description:".dimmed(), desc);
+    }
+
+    if let Some(env) = &worker.environment {
+        println!("{:12} {}", "Environment:".dimmed(), env.name.cyan());
     }
 
     println!(
@@ -271,23 +275,28 @@ async fn cmd_link<B: Backend>(backend: &B, name: &str, env: &str) -> Result<(), 
 async fn cmd_upload<B: Backend>(
     backend: &B,
     name: &str,
-    file: PathBuf,
+    path: PathBuf,
 ) -> Result<(), BackendError> {
-    // Verify it's a zip file
-    if file.extension().and_then(|e| e.to_str()) != Some("zip") {
-        return Err(BackendError::Api("File must be a .zip archive".to_string()));
-    }
-
-    // Read zip file
-    let zip_data = std::fs::read(&file).map_err(|e| {
-        BackendError::Api(format!("Failed to read file '{}': {}", file.display(), e))
-    })?;
+    let zip_data = if path.is_dir() {
+        // Create zip from folder
+        println!("{} Creating archive from {}...", "→".blue(), path.display());
+        create_zip_from_folder(&path)?
+    } else if path.extension().and_then(|e| e.to_str()) == Some("zip") {
+        // Read existing zip file
+        std::fs::read(&path).map_err(|e| {
+            BackendError::Api(format!("Failed to read file '{}': {}", path.display(), e))
+        })?
+    } else {
+        return Err(BackendError::Api(
+            "Path must be a .zip archive or a folder".to_string(),
+        ));
+    };
 
     let size_kb = zip_data.len() / 1024;
     println!(
         "{} Uploading {} ({} KB)...",
         "→".blue(),
-        file.display(),
+        path.display(),
         size_kb
     );
 
@@ -310,6 +319,60 @@ async fn cmd_upload<B: Backend>(
     println!("{:12} {} files", "Assets:".dimmed(), result.uploaded.assets);
 
     Ok(())
+}
+
+fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {
+    use std::io::{Cursor, Write};
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    let mut buffer = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(&mut buffer);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_directory(
+        zip: &mut ZipWriter<&mut Cursor<Vec<u8>>>,
+        folder: &PathBuf,
+        base: &PathBuf,
+        options: SimpleFileOptions,
+    ) -> Result<(), BackendError> {
+        for entry in std::fs::read_dir(folder).map_err(|e| {
+            BackendError::Api(format!(
+                "Failed to read directory '{}': {}",
+                folder.display(),
+                e
+            ))
+        })? {
+            let entry =
+                entry.map_err(|e| BackendError::Api(format!("Failed to read entry: {}", e)))?;
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(base)
+                .map_err(|e| BackendError::Api(format!("Path error: {}", e)))?;
+
+            if path.is_dir() {
+                add_directory(zip, &path, base, options)?;
+            } else {
+                let content = std::fs::read(&path).map_err(|e| {
+                    BackendError::Api(format!("Failed to read file '{}': {}", path.display(), e))
+                })?;
+
+                zip.start_file(relative.to_string_lossy(), options)
+                    .map_err(|e| BackendError::Api(format!("Zip error: {}", e)))?;
+
+                zip.write_all(&content)
+                    .map_err(|e| BackendError::Api(format!("Zip write error: {}", e)))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    add_directory(&mut zip, folder, folder, options)?;
+    zip.finish()
+        .map_err(|e| BackendError::Api(format!("Zip finish error: {}", e)))?;
+
+    Ok(buffer.into_inner())
 }
 
 #[cfg(test)]

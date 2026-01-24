@@ -25,6 +25,10 @@ pub enum AliasCommand {
         #[arg(long, conflicts_with = "api")]
         db: Option<String>,
 
+        /// User email or username to operate as (for DB backend)
+        #[arg(long, requires = "db")]
+        user: Option<String>,
+
         /// Overwrite existing alias
         #[arg(short, long)]
         force: bool,
@@ -57,8 +61,9 @@ impl AliasCommand {
                 token,
                 insecure,
                 db,
+                user,
                 force,
-            } => cmd_set(name, api, token, insecure, db, force),
+            } => cmd_set(name, api, token, insecure, db, user, force),
             Self::List => cmd_list(),
             Self::Remove { name } => cmd_remove(name),
             Self::SetDefault { name } => cmd_set_default(name),
@@ -72,13 +77,14 @@ fn cmd_set(
     token: Option<String>,
     insecure: bool,
     db: Option<String>,
+    user: Option<String>,
     force: bool,
 ) -> Result<(), ConfigError> {
     let mut config = Config::load()?;
 
     let alias_config = match (api, db) {
         (Some(url), None) => AliasConfig::api(url, token, insecure),
-        (None, Some(database_url)) => AliasConfig::db(database_url),
+        (None, Some(database_url)) => AliasConfig::db(database_url, user, None),
         _ => {
             eprintln!(
                 "{} Either --api or --db must be specified",
@@ -102,7 +108,7 @@ fn cmd_set(
         name.green().bold(),
         match alias_config {
             AliasConfig::Api { url, .. } => url,
-            AliasConfig::Db { database_url } => mask_password(&database_url),
+            AliasConfig::Db { database_url, .. } => mask_password(&database_url),
         }
     );
 
@@ -136,7 +142,26 @@ fn cmd_list() -> Result<(), ConfigError> {
                 let auth = if token.is_some() { " (auth)" } else { "" };
                 ("api".cyan(), format!("{}{}", url, auth.dimmed()))
             }
-            AliasConfig::Db { database_url } => ("db".yellow(), mask_password(database_url)),
+            AliasConfig::Db {
+                database_url,
+                user,
+                storage,
+            } => {
+                let user_info = user
+                    .as_ref()
+                    .map(|u| format!(" @{}", u))
+                    .unwrap_or_default();
+                let storage_info = if storage.is_some() { " (storage)" } else { "" };
+                (
+                    "db".yellow(),
+                    format!(
+                        "{}{}{}",
+                        mask_password(database_url),
+                        user_info.cyan(),
+                        storage_info.dimmed()
+                    ),
+                )
+            }
         };
 
         println!(

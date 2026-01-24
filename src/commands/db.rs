@@ -60,7 +60,7 @@ fn resolve_database_url(alias: Option<String>) -> Result<String, DbError> {
         .ok_or_else(|| ConfigError::AliasNotFound(alias_name.clone()))?;
 
     match alias_config {
-        AliasConfig::Db { database_url } => Ok(database_url.clone()),
+        AliasConfig::Db { database_url, .. } => Ok(database_url.clone()),
         AliasConfig::Api { .. } => Err(DbError::NotDbAlias(alias_name)),
     }
 }

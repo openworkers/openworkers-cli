@@ -28,12 +28,20 @@ pub enum BackendError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkerEnvironmentRef {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Worker {
     pub id: String,
     pub name: String,
     #[serde(alias = "desc")]
     pub description: Option<String>,
     pub current_version: Option<i32>,
+    pub environment: Option<WorkerEnvironmentRef>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

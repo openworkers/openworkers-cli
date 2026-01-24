@@ -32,6 +32,7 @@ impl MockBackend {
             name: name.to_string(),
             description: description.map(|s| s.to_string()),
             current_version: None,
+            environment: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -49,6 +50,7 @@ impl MockBackend {
             name: name.to_string(),
             description: None,
             current_version: Some(version),
+            environment: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -94,6 +96,7 @@ impl Backend for MockBackend {
             name: input.name.clone(),
             description: input.description,
             current_version: None,
+            environment: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
