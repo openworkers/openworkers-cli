@@ -24,6 +24,11 @@ pub fn run(alias_name: &str) -> Result<(), ConfigError> {
     };
 
     // Prompt for token
+    println!(
+        "Logging into {} ({})",
+        alias_name.cyan().bold(),
+        url.dimmed()
+    );
     print!("Enter API token: ");
     io::stdout().flush().unwrap();
 
