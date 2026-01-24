@@ -1,6 +1,7 @@
 mod backend;
 mod commands;
 mod config;
+mod s3;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;

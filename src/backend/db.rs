@@ -1,10 +1,14 @@
 use super::{
     Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
     CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, Worker,
+    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult,
+    UploadWorkerInfo, UploadedCounts, Worker,
 };
+use crate::s3::{S3Client, S3Config, get_mime_type};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
+use std::io::Read;
+use zip::ZipArchive;
 
 pub struct DbBackend {
     pool: PgPool,
@@ -228,12 +232,192 @@ impl Backend for DbBackend {
 
     async fn upload_worker(
         &self,
-        _name: &str,
-        _zip_data: Vec<u8>,
+        name: &str,
+        zip_data: Vec<u8>,
     ) -> Result<UploadResult, BackendError> {
-        Err(BackendError::Api(
-            "Upload requires API access (for S3 assets). Use an API alias.".to_string(),
-        ))
+        // 1. Get worker by name
+        let worker = self.get_worker(name).await?;
+        let worker_id: uuid::Uuid = worker
+            .id
+            .parse()
+            .map_err(|_| BackendError::Api(format!("Invalid worker ID: {}", worker.id)))?;
+
+        // 2. Get ASSETS binding for this worker
+        let assets_binding = sqlx::query(
+            r#"
+            SELECT
+                sc.id as storage_config_id,
+                sc.bucket,
+                sc.prefix,
+                sc.access_key_id,
+                sc.secret_access_key,
+                sc.endpoint,
+                sc.region
+            FROM workers w
+            JOIN environment_values ev ON ev.environment_id = w.environment_id
+            JOIN storage_configs sc ON sc.id = ev.value::uuid
+            WHERE w.id = $1 AND ev.type = 'assets'
+            LIMIT 1
+            "#,
+        )
+        .bind(worker_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| {
+            BackendError::Api(
+                "Worker has no ASSETS binding. Add an assets binding to the worker environment first.".to_string(),
+            )
+        })?;
+
+        let bucket: String = assets_binding.get("bucket");
+        let prefix: Option<String> = assets_binding.get("prefix");
+        let access_key_id: String = assets_binding.get("access_key_id");
+        let secret_access_key: String = assets_binding.get("secret_access_key");
+        let endpoint: Option<String> = assets_binding.get("endpoint");
+        let region: Option<String> = assets_binding.get("region");
+
+        let endpoint = endpoint
+            .ok_or_else(|| BackendError::Api("Storage endpoint not configured".to_string()))?;
+
+        // 3. Extract zip
+        let cursor = std::io::Cursor::new(zip_data);
+        let mut archive = ZipArchive::new(cursor)
+            .map_err(|e| BackendError::Api(format!("Failed to read zip archive: {}", e)))?;
+
+        let mut worker_script: Option<String> = None;
+        let mut language = "javascript";
+        let mut assets: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| BackendError::Api(format!("Failed to read zip entry: {}", e)))?;
+
+            if file.is_dir() {
+                continue;
+            }
+
+            let filename = file.name().to_string();
+
+            // Normalize path (remove leading directory if present)
+            let normalized = filename
+                .split('/')
+                .skip_while(|s| !s.contains('.'))
+                .collect::<Vec<_>>()
+                .join("/");
+
+            let check_name = if normalized.is_empty() {
+                &filename
+            } else {
+                &normalized
+            };
+
+            if check_name == "worker.js"
+                || check_name == "worker.ts"
+                || check_name == "_worker.js"
+                || check_name == "_worker.ts"
+            {
+                let mut content = String::new();
+                file.read_to_string(&mut content).map_err(|e| {
+                    BackendError::Api(format!("Failed to read worker script: {}", e))
+                })?;
+                worker_script = Some(content);
+                language = if check_name.ends_with(".ts") {
+                    "typescript"
+                } else {
+                    "javascript"
+                };
+            } else if filename.contains("assets/") {
+                // Extract asset path after "assets/"
+                if let Some(pos) = filename.find("assets/") {
+                    let asset_path = &filename[pos + 7..];
+
+                    if !asset_path.is_empty() {
+                        let mut content = Vec::new();
+                        file.read_to_end(&mut content).map_err(|e| {
+                            BackendError::Api(format!("Failed to read asset: {}", e))
+                        })?;
+                        assets.push((asset_path.to_string(), content));
+                    }
+                }
+            }
+        }
+
+        let script = worker_script.ok_or_else(|| {
+            BackendError::Api("No worker.js or worker.ts found in zip archive".to_string())
+        })?;
+
+        // 4. Update worker script in DB
+        let script_bytes = script.as_bytes();
+        let mut hasher = Sha256::new();
+        hasher.update(script_bytes);
+        let hash = hex::encode(hasher.finalize());
+
+        // Get next version
+        let current_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM worker_deployments WHERE worker_id = $1")
+                .bind(worker_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+        let next_version = current_version.unwrap_or(0) + 1;
+
+        // Insert deployment
+        sqlx::query(
+            r#"
+            INSERT INTO worker_deployments (worker_id, version, hash, code_type, code, message)
+            VALUES ($1, $2, $3, $4::enum_code_type, $5, 'Upload via CLI')
+            "#,
+        )
+        .bind(worker_id)
+        .bind(next_version)
+        .bind(&hash)
+        .bind(language)
+        .bind(script_bytes)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        // Update worker's current_version
+        sqlx::query("UPDATE workers SET current_version = $1 WHERE id = $2")
+            .bind(next_version)
+            .bind(worker_id)
+            .execute(&self.pool)
+            .await?;
+
+        // 5. Upload assets to S3
+        let s3_client = S3Client::new(S3Config {
+            bucket,
+            endpoint,
+            access_key_id,
+            secret_access_key,
+            region: region.unwrap_or_else(|| "auto".to_string()),
+            prefix,
+        });
+
+        let mut uploaded_count = 0;
+
+        for (path, content) in assets {
+            let content_type = get_mime_type(&path);
+
+            match s3_client.put(&path, content, content_type).await {
+                Ok(true) => uploaded_count += 1,
+                Ok(false) => eprintln!("Failed to upload {}", path),
+                Err(e) => eprintln!("Error uploading {}: {}", path, e),
+            }
+        }
+
+        Ok(UploadResult {
+            success: true,
+            worker: UploadWorkerInfo {
+                id: worker.id,
+                name: worker.name,
+                url: format!("https://{}.workers.rocks", name),
+            },
+            uploaded: UploadedCounts {
+                script: true,
+                assets: uploaded_count,
+            },
+        })
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
