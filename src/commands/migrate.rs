@@ -83,7 +83,30 @@ async fn connect(database_url: &str) -> Result<PgPool, MigrateError> {
 }
 
 async fn cmd_run(pool: &PgPool) -> Result<(), MigrateError> {
-    println!("Running migrations...\n");
+    // Get already applied migrations
+    let applied: Vec<i64> = sqlx::query_scalar("SELECT version FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    // Find pending migrations
+    let pending: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|m| !applied.contains(&m.version))
+        .collect();
+
+    if pending.is_empty() {
+        println!("{}", "No pending migrations.".green());
+        return Ok(());
+    }
+
+    println!("Running {} migration(s)...\n", pending.len());
+
+    for migration in &pending {
+        println!("  {} {}", "Applying".blue(), migration.description);
+    }
+
+    println!();
 
     MIGRATOR.run(pool).await?;
 
