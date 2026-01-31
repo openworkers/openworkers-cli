@@ -39,7 +39,10 @@ cargo install --git https://github.com/openworkers/openworkers-cli
 ## Quick Start
 
 ```bash
-# Login (opens browser)
+# Configure your API backend
+ow alias set prod --api https://dash.openworkers.com
+
+# Login (prompts for API token)
 ow login
 
 # Create and deploy a worker
