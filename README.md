@@ -27,6 +27,7 @@ ow workers deploy my-api worker.ts
 | `storage`   | `s`   | S3/R2 storage configurations   |
 | `kv`        | `k`   | Key-value namespaces           |
 | `databases` | `d`   | SQL database bindings          |
+| `users`     | `u`   | User management (DB only)      |
 | `alias`     |       | Backend connection aliases     |
 | `login`     |       | Authenticate with API          |
 | `migrate`   |       | Database schema migrations     |

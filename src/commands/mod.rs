@@ -5,4 +5,5 @@ pub mod kv;
 pub mod login;
 pub mod migrate;
 pub mod storage;
+pub mod users;
 pub mod workers;

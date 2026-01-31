@@ -16,6 +16,7 @@ use commands::env::EnvCommand;
 use commands::kv::KvCommand;
 use commands::migrate::MigrateCommand;
 use commands::storage::StorageCommand;
+use commands::users::UsersCommand;
 use commands::workers::WorkersCommand;
 use config::{AliasConfig, Config, PlatformStorageConfig};
 
@@ -25,6 +26,12 @@ const EXAMPLES: &str = color_print::cstr!(
   ow login                              <dim>Authenticate with the API</dim>
   ow workers create my-api              <dim>Create a new worker</dim>
   ow workers deploy my-api worker.ts    <dim>Deploy code to worker</dim>
+
+  <dim># Self-hosting (database setup)</dim>
+  ow alias set local --db postgres://... <dim>Configure DB connection</dim>
+  ow local migrate run                  <dim>Run migrations</dim>
+  ow local users create admin           <dim>Create first user (bootstrap)</dim>
+  ow alias set local --db postgres://... --user admin  <dim>Set user context</dim>
 
   <dim># Environment and bindings</dim>
   ow env create prod                    <dim>Create an environment</dim>
@@ -88,6 +95,20 @@ enum Commands {
     Migrate {
         #[command(subcommand)]
         command: MigrateCommand,
+    },
+
+    /// Manage users (requires db alias, no user context needed for create)
+    #[command(
+        visible_alias = "u",
+        alias = "user",
+        after_help = "Examples:\n  \
+        ow local users list                    List all users\n  \
+        ow local users create admin            Create user (bootstrap mode)\n  \
+        ow local users get admin               Show user details"
+    )]
+    Users {
+        #[command(subcommand)]
+        command: UsersCommand,
     },
 
     /// Create, deploy, and manage workers
@@ -218,6 +239,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "alias",
         "login",
         "migrate",
+        "users",
         "workers",
         "env",
         "storage",
@@ -225,12 +247,14 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "databases",
         "setup-storage",
         // Short aliases
+        "u",
         "w",
         "e",
         "s",
         "k",
         "d",
         // Singular/plural variants (for flexibility)
+        "user",
         "worker",
         "envs",
         "environment",
@@ -514,6 +538,7 @@ async fn main() {
             commands::login::run(&alias_name).map_err(|e| e.to_string())
         })(),
         Commands::Migrate { command } => command.run(alias).await.map_err(|e| e.to_string()),
+        Commands::Users { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Workers { command } => run_workers_command(alias, command).await,
         Commands::Env { command } => run_env_command(alias, command).await,
         Commands::Storage { command } => run_storage_command(alias, command).await,
