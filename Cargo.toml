@@ -1,8 +1,15 @@
 [package]
 name = "openworkers-cli"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 license = "MIT"
+description = "CLI for OpenWorkers - Self-hosted Cloudflare Workers runtime"
+repository = "https://github.com/openworkers/openworkers-cli"
+homepage = "https://github.com/openworkers/openworkers"
+readme = "README.md"
+keywords = ["workers", "serverless", "edge", "runtime", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+authors = ["OpenWorkers Team"]
 
 [[bin]]
 name = "ow"
