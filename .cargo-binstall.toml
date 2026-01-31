@@ -1,7 +1,24 @@
 [binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
-bin-dir = "{ bin }{ binary-ext }"
+pkg-url = "{ repo }/releases/download/v{ version }/ow-{ target }{ archive-suffix }"
+bin-dir = "ow{ binary-ext }"
 pkg-fmt = "tgz"
 
 [binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+# Map Rust targets to our simplified naming
+[binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-linux-x86_64.tar.gz"
+
+[binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-linux-aarch64.tar.gz"
+
+[binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-macos-x86_64.tar.gz"
+
+[binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-macos-aarch64.tar.gz"
+
+[binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-windows-x86_64.exe.zip"
 pkg-fmt = "zip"
