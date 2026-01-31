@@ -1,6 +1,6 @@
 [binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/ow-{ target }{ archive-suffix }"
-bin-dir = "ow{ binary-ext }"
+bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 
 [binstall.overrides.x86_64-pc-windows-msvc]

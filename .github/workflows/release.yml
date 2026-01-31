@@ -108,15 +108,15 @@ jobs:
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/ow ${{ matrix.name }}
-          chmod +x ${{ matrix.name }}
-          tar czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/ow ow
+          chmod +x ow
+          tar czf ${{ matrix.name }}.tar.gz ow
 
       - name: Prepare binary (Windows)
         if: runner.os == 'Windows'
         run: |
-          copy target\${{ matrix.target }}\release\ow.exe ${{ matrix.name }}
-          7z a ${{ matrix.name }}.zip ${{ matrix.name }}
+          copy target\${{ matrix.target }}\release\ow.exe ow.exe
+          7z a ${{ matrix.name }}.zip ow.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
