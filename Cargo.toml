@@ -1,6 +1,6 @@
 [package]
 name = "openworkers-cli"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 license = "MIT"
 description = "CLI for OpenWorkers - Self-hosted Cloudflare Workers runtime"
@@ -14,6 +14,27 @@ authors = ["OpenWorkers Team"]
 [[bin]]
 name = "ow"
 path = "src/main.rs"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-macos-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-macos-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/ow-windows-x86_64.exe.zip"
+pkg-fmt = "zip"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
