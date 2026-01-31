@@ -2,12 +2,43 @@
 
 Command-line interface for managing OpenWorkers deployments.
 
+## Installation
+
+**Prebuilt binaries (recommended):**
+
+```bash
+# Using cargo-binstall (auto-detects prebuilt binaries)
+cargo install cargo-binstall
+cargo binstall openworkers-cli
+
+# Or download manually from GitHub Releases
+curl -L https://github.com/openworkers/openworkers-cli/releases/latest/download/ow-linux-x86_64.tar.gz | tar xz
+sudo mv ow /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/openworkers/openworkers-cli/releases/latest/download/ow-macos-x86_64.tar.gz | tar xz
+sudo mv ow /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -L https://github.com/openworkers/openworkers-cli/releases/latest/download/ow-macos-aarch64.tar.gz | tar xz
+sudo mv ow /usr/local/bin/
+```
+
+**Docker:**
+
+```bash
+docker run --rm ghcr.io/openworkers/openworkers-cli --help
+```
+
+**Build from source:**
+
+```bash
+cargo install --git https://github.com/openworkers/openworkers-cli
+```
+
 ## Quick Start
 
 ```bash
-# Install
-cargo install --path .
-
 # Login (opens browser)
 ow login
 
