@@ -48,7 +48,10 @@ pub enum UsersCommand {
     },
 
     /// Delete a user
-    #[command(alias = "rm", after_help = "Example:\n  ow local users delete old-user")]
+    #[command(
+        alias = "rm",
+        after_help = "Example:\n  ow local users delete old-user"
+    )]
     Delete {
         /// Username to delete
         username: String,
@@ -166,11 +169,10 @@ async fn cmd_get(pool: &PgPool, username: &str) -> Result<(), UsersError> {
 
 async fn cmd_create(pool: &PgPool, username: String) -> Result<(), UsersError> {
     // Check if user already exists
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
-            .bind(&username)
-            .fetch_one(pool)
-            .await?;
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
+        .bind(&username)
+        .fetch_one(pool)
+        .await?;
 
     if exists {
         return Err(UsersError::UserExists(username));
@@ -197,10 +199,7 @@ async fn cmd_create(pool: &PgPool, username: String) -> Result<(), UsersError> {
         id.to_string().dimmed()
     );
 
-    println!(
-        "\n{} Set this user as default with:",
-        "Next:".cyan().bold()
-    );
+    println!("\n{} Set this user as default with:", "Next:".cyan().bold());
     println!(
         "  {}",
         format!("ow alias set <alias> --db <url> --user {}", username).cyan()

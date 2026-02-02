@@ -3,6 +3,7 @@ use super::{
     CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
     KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, Worker,
 };
+use crate::config::DEFAULT_API_URL;
 use reqwest::Client;
 
 pub struct ApiBackend {
@@ -38,6 +39,10 @@ impl ApiBackend {
 }
 
 impl Backend for ApiBackend {
+    fn is_default_cloud(&self) -> bool {
+        self.base_url == DEFAULT_API_URL
+    }
+
     async fn list_workers(&self) -> Result<Vec<Worker>, BackendError> {
         let response = self
             .request(reqwest::Method::GET, "/workers")

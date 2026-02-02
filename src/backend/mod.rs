@@ -251,6 +251,11 @@ pub struct CreateDatabaseInput {
 }
 
 pub trait Backend: Send + Sync {
+    /// Returns true if this backend should use workers.rocks as fallback URL
+    fn is_default_cloud(&self) -> bool {
+        false
+    }
+
     fn list_workers(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<Worker>, BackendError>> + Send;

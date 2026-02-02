@@ -5,7 +5,7 @@ use thiserror::Error;
 
 const CONFIG_DIR: &str = ".openworkers";
 const CONFIG_FILE: &str = "config.json";
-const DEFAULT_API_URL: &str = "https://dash.openworkers.com/api/v1";
+pub const DEFAULT_API_URL: &str = "https://dash.openworkers.com/api/v1";
 
 #[derive(Error, Debug)]
 pub enum ConfigError {

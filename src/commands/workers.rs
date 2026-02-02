@@ -323,7 +323,21 @@ async fn cmd_upload<B: Backend>(
     );
 
     println!();
-    println!("{:12} {}", "URL:".dimmed(), result.worker.url);
+    // Show URL based on backend type and URL format
+    // - If URL starts with http, use it as-is (custom domain or cloud API)
+    // - If URL doesn't start with http (just worker name) and backend is default cloud, show workers.rocks
+    // - Otherwise, just show worker name
+    if result.worker.url.starts_with("http") {
+        println!("{:12} {}", "URL:".dimmed(), result.worker.url);
+    } else if backend.is_default_cloud() {
+        println!(
+            "{:12} https://{}.workers.rocks",
+            "URL:".dimmed(),
+            result.worker.url
+        );
+    } else {
+        println!("{:12} {}", "Worker:".dimmed(), result.worker.url);
+    }
     println!(
         "{:12} {}",
         "Script:".dimmed(),
