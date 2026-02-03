@@ -1,0 +1,11 @@
+--- /dev/fd/11	2026-02-03 01:56:12
++++ /dev/fd/12	2026-02-03 01:56:12
+@@ -59,6 +59,8 @@
+           AND (
+             pattern = p_path
+             OR (pattern LIKE '%/*' AND p_path LIKE REPLACE(pattern, '/*', '') || '%')
++            -- Allow /about.html to match route /about (prerendered fallback)
++            OR (p_path LIKE '%.html' AND pattern = REPLACE(p_path, '.html', ''))
+           )
+         ORDER BY priority DESC
+         LIMIT 1;

@@ -1,0 +1,35 @@
+--- /dev/fd/11	2026-02-03 01:57:33
++++ /dev/fd/12	2026-02-03 01:57:33
+@@ -17,6 +17,7 @@
+         v_result.project_id := NULL;
+         v_result.backend_type := 'worker'::enum_backend_type;
+         v_result.assets_storage_id := NULL;
++        v_result.priority := NULL;
+         RETURN v_result;
+     END IF;
+ 
+@@ -51,7 +52,7 @@
+ 
+     -- If we have a project, match route pattern
+     IF v_project_id_temp IS NOT NULL THEN
+-        SELECT backend_type, worker_id
++        SELECT backend_type, worker_id, priority
+         INTO v_route_record
+         FROM project_routes
+         WHERE project_id = v_project_id_temp
+@@ -69,6 +70,7 @@
+         v_result.project_id := v_project_id_temp;
+         v_result.worker_id := v_route_record.worker_id;
+         v_result.backend_type := v_route_record.backend_type;
++        v_result.priority := v_route_record.priority;
+ 
+         -- If storage backend, get ASSETS storage_config_id from main worker's environment
+         IF v_route_record.backend_type = 'storage' THEN
+@@ -96,6 +98,7 @@
+         v_result.project_id := NULL;
+         v_result.backend_type := 'worker'::enum_backend_type;
+         v_result.assets_storage_id := NULL;
++        v_result.priority := NULL;
+         RETURN v_result;
+     END IF;
+ 
