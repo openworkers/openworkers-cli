@@ -384,7 +384,8 @@ fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {
                     BackendError::Api(format!("Failed to read file '{}': {}", path.display(), e))
                 })?;
 
-                zip.start_file(relative.to_string_lossy(), options)
+                let relative_path = relative.to_string_lossy().replace('\\', "/");
+                zip.start_file(relative_path, options)
                     .map_err(|e| BackendError::Api(format!("Zip error: {}", e)))?;
 
                 zip.write_all(&content)

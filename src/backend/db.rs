@@ -430,7 +430,7 @@ impl Backend for DbBackend {
                 continue;
             }
 
-            let filename = file.name().to_string();
+            let filename = file.name().replace('\\', "/");
 
             // Normalize path (remove leading directory if present)
             let normalized = filename
