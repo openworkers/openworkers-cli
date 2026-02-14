@@ -111,7 +111,7 @@ impl Backend for DbBackend {
                    e.id as env_id, e.name as env_name
             FROM workers w
             LEFT JOIN environments e ON e.id = w.environment_id
-            WHERE w.user_id = $1
+            WHERE w.user_id = $1 AND w.name IS NOT NULL
             ORDER BY w.name
             "#,
         )
