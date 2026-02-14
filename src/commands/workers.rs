@@ -474,16 +474,29 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
         {
             let hash_b64 = hex_to_base64(hash_hex);
 
-            // HEAD check: compare x-amz-checksum-sha256 with local hash
+            // HEAD check: compare checksum and etag
+            let mut checksum_match = false;
+            let mut etag_match = false;
+
             if let Ok(resp) = client.head(&asset_url.head_url).send().await {
                 if resp.status().is_success() {
                     if let Some(remote_hash) = resp.headers().get("x-amz-checksum-sha256") {
-                        if remote_hash.to_str().unwrap_or("") == hash_b64 {
-                            skipped += 1;
-                            continue;
-                        }
+                        checksum_match = remote_hash.to_str().unwrap_or("") == hash_b64;
                     }
+
+                    etag_match = resp.headers().get("etag").is_some();
                 }
+            }
+
+            if checksum_match {
+                println!(
+                    "  {} {} {}",
+                    "⎿".dimmed(),
+                    asset_url.path,
+                    format!("(skipped, checksum match)").dimmed()
+                );
+                skipped += 1;
+                continue;
             }
 
             // Upload
@@ -497,7 +510,12 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    println!("  {} {}", "⎿".dimmed(), asset_url.path);
+                    let reason = if etag_match {
+                        "checksum changed"
+                    } else {
+                        "new"
+                    };
+                    println!("  {} {} ({})", "⎿".dimmed(), asset_url.path, reason);
                     uploaded += 1;
                 }
                 Ok(resp) => eprintln!(
