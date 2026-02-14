@@ -9,6 +9,7 @@ use crate::s3::{S3Client, S3Config, get_mime_type};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use std::io::Read;
 use zip::ZipArchive;
 
@@ -22,40 +23,23 @@ struct RoutesConfig {
     prerendered: Vec<String>,
     #[serde(default)]
     #[allow(dead_code)]
-    functions: Vec<String>,
+    functions: Vec<FunctionRoute>,
     #[serde(default)]
     #[allow(dead_code)]
     ssr: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct FunctionRoute {
+    pattern: String,
+    worker: String,
 }
 
 pub struct DbBackend {
     pool: PgPool,
     user_id: uuid::Uuid,
     platform_storage: Option<PlatformStorageConfig>,
-}
-
-/// Helper to create storage routes for a project
-async fn create_storage_routes(
-    pool: &PgPool,
-    project_id: uuid::Uuid,
-    patterns: &[String],
-    priority: i32,
-) -> Result<(), BackendError> {
-    for pattern in patterns {
-        sqlx::query(
-            r#"
-            INSERT INTO project_routes (project_id, pattern, priority, backend_type)
-            VALUES ($1, $2, $3, 'storage'::enum_backend_type)
-            ON CONFLICT (project_id, pattern) DO UPDATE SET priority = $3, backend_type = 'storage'::enum_backend_type
-            "#,
-        )
-        .bind(project_id)
-        .bind(pattern)
-        .bind(priority)
-        .execute(pool)
-        .await?;
-    }
-    Ok(())
 }
 
 impl DbBackend {
@@ -420,6 +404,7 @@ impl Backend for DbBackend {
         let mut language = "javascript";
         let mut assets: Vec<(String, Vec<u8>)> = Vec::new();
         let mut routes_json: Option<String> = None;
+        let mut function_scripts: HashMap<String, String> = HashMap::new();
 
         for i in 0..archive.len() {
             let mut file = archive
@@ -466,6 +451,16 @@ impl Backend for DbBackend {
                     BackendError::Api(format!("Failed to read _routes.json: {}", e))
                 })?;
                 routes_json = Some(content);
+            } else if filename.contains("functions/") && filename.ends_with(".js") {
+                // Extract path starting from "functions/"
+                if let Some(pos) = filename.find("functions/") {
+                    let func_path = &filename[pos..];
+                    let mut content = String::new();
+                    file.read_to_string(&mut content).map_err(|e| {
+                        BackendError::Api(format!("Failed to read function script: {}", e))
+                    })?;
+                    function_scripts.insert(func_path.to_string(), content);
+                }
             } else if filename.contains("assets/") {
                 // Extract asset path after "assets/"
                 if let Some(pos) = filename.find("assets/") {
@@ -486,44 +481,72 @@ impl Backend for DbBackend {
             BackendError::Api("No worker.js or worker.ts found in zip archive".to_string())
         })?;
 
-        // 5. Update worker script in DB
+        // 5. Prepare deploy_project parameters
         let script_bytes = script.as_bytes();
         let mut hasher = Sha256::new();
         hasher.update(script_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        // Get next version
-        let current_version: Option<i32> =
-            sqlx::query_scalar("SELECT MAX(version) FROM worker_deployments WHERE worker_id = $1")
-                .bind(worker_id)
-                .fetch_one(&self.pool)
-                .await?;
+        // Build storage routes JSON array from _routes.json
+        let mut storage_routes = Vec::new();
+        let routes = if let Some(ref routes_content) = routes_json {
+            let r: RoutesConfig = serde_json::from_str(routes_content)
+                .map_err(|e| BackendError::Api(format!("Failed to parse routes.json: {}", e)))?;
 
-        let next_version = current_version.unwrap_or(0) + 1;
+            for pattern in &r.immutable {
+                storage_routes.push(serde_json::json!({"pattern": pattern, "priority": 3}));
+            }
 
-        // Insert deployment
-        sqlx::query(
+            for pattern in &r.static_routes {
+                storage_routes.push(serde_json::json!({"pattern": pattern, "priority": 2}));
+            }
+
+            for pattern in &r.prerendered {
+                storage_routes.push(serde_json::json!({"pattern": pattern, "priority": 1}));
+            }
+
+            Some(r)
+        } else {
+            None
+        };
+
+        // Build function workers JSON array
+        let mut function_workers = Vec::new();
+
+        if let Some(ref routes) = routes {
+            for func in &routes.functions {
+                if let Some(script) = function_scripts.get(&func.worker) {
+                    function_workers
+                        .push(serde_json::json!({"pattern": func.pattern, "script": script}));
+                } else {
+                    eprintln!("Warning: function file not found in zip: {}", func.worker);
+                }
+            }
+        }
+
+        // 6. Call deploy_project — single DB round-trip for all routes + functions
+        let row = sqlx::query(
             r#"
-            INSERT INTO worker_deployments (worker_id, version, hash, code_type, code, message)
-            VALUES ($1, $2, $3, $4::enum_code_type, $5, 'Upload via CLI')
+            SELECT * FROM deploy_project($1, $2, $3, $4, $5::enum_code_type, $6::jsonb, $7::jsonb)
             "#,
         )
         .bind(worker_id)
-        .bind(next_version)
+        .bind(self.user_id)
+        .bind(script_bytes)
         .bind(&hash)
         .bind(language)
-        .bind(script_bytes)
-        .fetch_optional(&self.pool)
+        .bind(serde_json::Value::Array(storage_routes))
+        .bind(serde_json::Value::Array(function_workers))
+        .fetch_one(&self.pool)
         .await?;
 
-        // Update worker's current_version
-        sqlx::query("UPDATE workers SET current_version = $1 WHERE id = $2")
-            .bind(next_version)
-            .bind(worker_id)
-            .execute(&self.pool)
-            .await?;
+        let functions_created: i32 = row.get("functions_created");
 
-        // 6. Upload assets to S3
+        if functions_created > 0 {
+            eprintln!("  Created {} function workers", functions_created);
+        }
+
+        // 7. Upload assets to S3
         let s3_client = S3Client::new(S3Config {
             bucket,
             endpoint,
@@ -545,47 +568,7 @@ impl Backend for DbBackend {
             }
         }
 
-        // 7. Ensure worker is in a project with routes
-        let project_id: Option<uuid::Uuid> =
-            sqlx::query_scalar("SELECT project_id FROM workers WHERE id = $1")
-                .bind(worker_id)
-                .fetch_one(&self.pool)
-                .await?;
-
-        let proj_id = if let Some(pid) = project_id {
-            // Worker already in project
-            pid
-        } else {
-            // Upgrade worker to project (creates project with same ID and catch-all route)
-            sqlx::query("SELECT upgrade_worker_to_project($1)")
-                .bind(worker_id)
-                .execute(&self.pool)
-                .await?;
-
-            // Get the project_id (same as worker_id)
-            worker_id
-        };
-
-        // 8. Parse routes.json if present and create routes
-        if let Some(routes_content) = routes_json {
-            let routes: RoutesConfig = serde_json::from_str(&routes_content)
-                .map_err(|e| BackendError::Api(format!("Failed to parse routes.json: {}", e)))?;
-
-            // Delete existing routes (except catch-all at priority 0)
-            sqlx::query("DELETE FROM project_routes WHERE project_id = $1 AND priority > 0")
-                .bind(proj_id)
-                .execute(&self.pool)
-                .await?;
-
-            // Create storage routes with different priorities
-            create_storage_routes(&self.pool, proj_id, &routes.immutable, 3).await?;
-            create_storage_routes(&self.pool, proj_id, &routes.static_routes, 2).await?;
-            create_storage_routes(&self.pool, proj_id, &routes.prerendered, 1).await?;
-
-            // SSR routes are handled by the catch-all route at priority 0 created by upgrade_worker_to_project
-        }
-
-        // 9. Try to find custom domain for this worker or project
+        // 8. Try to find custom domain for this worker or project
         let custom_domain: Option<String> = sqlx::query_scalar(
             r#"
             SELECT name FROM domains
