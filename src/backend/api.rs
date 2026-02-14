@@ -14,10 +14,20 @@ pub struct ApiBackend {
 
 impl ApiBackend {
     pub fn new(base_url: String, token: Option<String>, insecure: bool) -> Self {
-        let client = Client::builder()
-            .danger_accept_invalid_certs(insecure)
-            .build()
-            .expect("Failed to build HTTP client");
+        let mut builder = Client::builder().danger_accept_invalid_certs(insecure);
+
+        // Resolve *.localhost domains to 127.0.0.1 (RFC 6761)
+        if let Ok(url) = reqwest::Url::parse(&base_url) {
+            if let Some(host) = url.host_str() {
+                if host.ends_with(".localhost") {
+                    let port = url.port_or_known_default().unwrap_or(443);
+                    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+                    builder = builder.resolve(host, addr);
+                }
+            }
+        }
+
+        let client = builder.build().expect("Failed to build HTTP client");
 
         Self {
             client,

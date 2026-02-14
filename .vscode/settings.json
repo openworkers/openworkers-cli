@@ -1,3 +1,12 @@
 {
-  "cSpell.words": ["binstall", "prerendered", "psql", "reqwest"]
+  "cSpell.words": [
+    "binstall",
+    "chrono",
+    "codegen",
+    "prerendered",
+    "psql",
+    "reqwest",
+    "serde",
+    "sqlx"
+  ]
 }
