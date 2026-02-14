@@ -1,7 +1,8 @@
 use super::{
-    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
-    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, Worker,
+    AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
+    CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment,
+    Environment, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
+    UploadResult, Worker,
 };
 use crate::config::DEFAULT_API_URL;
 use reqwest::Client;
@@ -209,6 +210,7 @@ impl Backend for ApiBackend {
         &self,
         name: &str,
         zip_data: Vec<u8>,
+        assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
         use reqwest::multipart::{Form, Part};
 
@@ -220,7 +222,13 @@ impl Backend for ApiBackend {
             .mime_str("application/zip")
             .map_err(|e| BackendError::Api(e.to_string()))?;
 
-        let form = Form::new().part("file", part);
+        let mut form = Form::new().part("file", part);
+
+        if !assets_manifest.is_empty() {
+            let manifest_json = serde_json::to_string(assets_manifest)
+                .map_err(|e| BackendError::Api(e.to_string()))?;
+            form = form.text("assets", manifest_json);
+        }
 
         let response = self
             .request(

@@ -89,7 +89,8 @@ pub struct DeployInput {
 pub struct UploadResult {
     pub success: bool,
     pub worker: UploadWorkerInfo,
-    pub uploaded: UploadedCounts,
+    pub deployed: Option<DeployedInfo>,
+    pub assets: Option<Vec<PresignedAsset>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,9 +103,26 @@ pub struct UploadWorkerInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UploadedCounts {
-    pub script: bool,
-    pub assets: i32,
+pub struct DeployedInfo {
+    pub version: i32,
+    pub functions: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresignedAsset {
+    pub path: String,
+    pub head_url: String,
+    pub put_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetManifestEntry {
+    pub path: String,
+    pub size: usize,
+    pub content_type: String,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,6 +309,7 @@ pub trait Backend: Send + Sync {
         &self,
         name: &str,
         zip_data: Vec<u8>,
+        assets_manifest: &[AssetManifestEntry],
     ) -> impl std::future::Future<Output = Result<UploadResult, BackendError>> + Send;
 
     // Environment methods

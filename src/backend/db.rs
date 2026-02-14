@@ -1,8 +1,8 @@
 use super::{
-    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
-    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    EnvironmentValue, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
-    UploadResult, UploadWorkerInfo, UploadedCounts, Worker,
+    AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
+    CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, DeployedInfo,
+    Deployment, Environment, EnvironmentValue, KvNamespace, StorageConfig, UpdateEnvironmentInput,
+    UpdateWorkerInput, UploadResult, UploadWorkerInfo, Worker,
 };
 use crate::config::PlatformStorageConfig;
 use crate::s3::{S3Client, S3Config, get_mime_type};
@@ -345,6 +345,7 @@ impl Backend for DbBackend {
         &self,
         name: &str,
         zip_data: Vec<u8>,
+        _assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
         // 1. Get worker by name
         let worker = self.get_worker(name).await?;
@@ -540,6 +541,7 @@ impl Backend for DbBackend {
         .fetch_one(&self.pool)
         .await?;
 
+        let next_version: i32 = row.get("out_next_version");
         let functions_created: i32 = row.get("functions_created");
 
         if functions_created > 0 {
@@ -556,13 +558,11 @@ impl Backend for DbBackend {
             prefix,
         });
 
-        let mut uploaded_count = 0;
-
         for (path, content) in assets {
             let content_type = get_mime_type(&path);
 
             match s3_client.put(&path, content, content_type).await {
-                Ok(true) => uploaded_count += 1,
+                Ok(true) => {}
                 Ok(false) => eprintln!("Failed to upload {}", path),
                 Err(e) => eprintln!("Error uploading {}: {}", path, e),
             }
@@ -595,10 +595,11 @@ impl Backend for DbBackend {
                 name: worker.name,
                 url,
             },
-            uploaded: UploadedCounts {
-                script: true,
-                assets: uploaded_count,
-            },
+            deployed: Some(DeployedInfo {
+                version: next_version,
+                functions: functions_created,
+            }),
+            assets: None,
         })
     }
 

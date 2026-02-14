@@ -1,6 +1,8 @@
 use crate::backend::{
-    Backend, BackendError, CreateWorkerInput, DeployInput, UpdateWorkerInput, Worker,
+    AssetManifestEntry, Backend, BackendError, CreateWorkerInput, DeployInput, PresignedAsset,
+    UpdateWorkerInput, Worker,
 };
+use crate::s3::get_mime_type;
 use clap::Subcommand;
 use colored::Colorize;
 use std::path::PathBuf;
@@ -290,8 +292,26 @@ async fn cmd_upload<B: Backend>(
     name: &str,
     path: PathBuf,
 ) -> Result<(), BackendError> {
+    // Collect assets from folder (separate from zip)
+    let assets = if path.is_dir() {
+        collect_assets(&path)?
+    } else {
+        vec![]
+    };
+
+    // Build asset manifest with SHA-256 hashes
+    let manifest: Vec<AssetManifestEntry> = assets
+        .iter()
+        .map(|(p, content, ct, hash)| AssetManifestEntry {
+            path: p.clone(),
+            size: content.len(),
+            content_type: ct.clone(),
+            hash: hash.clone(),
+        })
+        .collect();
+
     let zip_data = if path.is_dir() {
-        // Create zip from folder
+        // Create zip from folder (code only, no assets)
         println!("{} Creating archive from {}...", "→".blue(), path.display());
         create_zip_from_folder(&path)?
     } else if path.extension().and_then(|e| e.to_str()) == Some("zip") {
@@ -307,26 +327,38 @@ async fn cmd_upload<B: Backend>(
 
     let size_kb = zip_data.len() / 1024;
     println!(
-        "{} Uploading {} ({} KB)...",
+        "{} Uploading {} ({} KB, {} assets)...",
         "→".blue(),
         path.display(),
-        size_kb
+        size_kb,
+        assets.len()
     );
 
-    let result = backend.upload_worker(name, zip_data).await?;
+    let result = backend.upload_worker(name, zip_data, &manifest).await?;
+
+    // Upload assets via presigned URLs if returned by API
+    let (uploaded_assets, skipped_assets) = if let Some(ref presigned) = result.assets {
+        println!("{} Checking {} assets...", "→".blue(), presigned.len());
+        upload_assets_presigned(presigned, &assets).await
+    } else {
+        (0, 0)
+    };
+
+    let version_str = result
+        .deployed
+        .as_ref()
+        .map(|d| format!("v{}", d.version))
+        .unwrap_or_else(|| "deployed".to_string());
 
     println!(
-        "{} Uploaded to '{}' (v{})",
+        "{} Uploaded to '{}' ({})",
         "Uploaded".green(),
         result.worker.name.bold(),
-        result.uploaded.assets
+        version_str
     );
 
     println!();
-    // Show URL based on backend type and URL format
-    // - If URL starts with http, use it as-is (custom domain or cloud API)
-    // - If URL doesn't start with http (just worker name) and backend is default cloud, show workers.rocks
-    // - Otherwise, just show worker name
+
     if result.worker.url.starts_with("http") {
         println!("{:12} {}", "URL:".dimmed(), result.worker.url);
     } else if backend.is_default_cloud() {
@@ -338,14 +370,148 @@ async fn cmd_upload<B: Backend>(
     } else {
         println!("{:12} {}", "Worker:".dimmed(), result.worker.url);
     }
-    println!(
-        "{:12} {}",
-        "Script:".dimmed(),
-        if result.uploaded.script { "✓" } else { "✗" }
-    );
-    println!("{:12} {} files", "Assets:".dimmed(), result.uploaded.assets);
+
+    if let Some(deployed) = &result.deployed {
+        println!("{:12} {}", "Version:".dimmed(), deployed.version);
+
+        if deployed.functions > 0 {
+            println!("{:12} {}", "Functions:".dimmed(), deployed.functions);
+        }
+    }
+
+    if result.assets.is_some() {
+        if skipped_assets > 0 {
+            println!(
+                "{:12} {} uploaded, {} unchanged",
+                "Assets:".dimmed(),
+                uploaded_assets,
+                skipped_assets
+            );
+        } else {
+            println!("{:12} {} uploaded", "Assets:".dimmed(), uploaded_assets);
+        }
+    } else if !assets.is_empty() {
+        // DB backend uploaded directly
+        println!("{:12} {} files", "Assets:".dimmed(), assets.len());
+    }
 
     Ok(())
+}
+
+/// Asset: (path, content, content_type, sha256_base64)
+type Asset = (String, Vec<u8>, String, String);
+
+/// Collect assets from the assets/ subdirectory of a folder
+fn collect_assets(folder: &PathBuf) -> Result<Vec<Asset>, BackendError> {
+    let assets_dir = folder.join("assets");
+
+    if !assets_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut assets = Vec::new();
+    collect_assets_recursive(&assets_dir, &assets_dir, &mut assets)?;
+    Ok(assets)
+}
+
+fn collect_assets_recursive(
+    dir: &PathBuf,
+    base: &PathBuf,
+    assets: &mut Vec<Asset>,
+) -> Result<(), BackendError> {
+    use sha2::{Digest, Sha256};
+
+    for entry in std::fs::read_dir(dir).map_err(|e| {
+        BackendError::Api(format!(
+            "Failed to read directory '{}': {}",
+            dir.display(),
+            e
+        ))
+    })? {
+        let entry = entry.map_err(|e| BackendError::Api(format!("Failed to read entry: {}", e)))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_assets_recursive(&path, base, assets)?;
+        } else {
+            let relative = path
+                .strip_prefix(base)
+                .map_err(|e| BackendError::Api(format!("Path error: {}", e)))?
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let content = std::fs::read(&path).map_err(|e| {
+                BackendError::Api(format!("Failed to read file '{}': {}", path.display(), e))
+            })?;
+
+            let hash_hex = hex::encode(Sha256::digest(&content));
+
+            let content_type = get_mime_type(&relative);
+            assets.push((relative, content, content_type.to_string(), hash_hex));
+        }
+    }
+
+    Ok(())
+}
+
+/// Convert a hex hash to base64 (for S3 x-amz-checksum-sha256 header)
+fn hex_to_base64(hex_str: &str) -> String {
+    use base64::Engine;
+
+    let bytes = hex::decode(hex_str).unwrap_or_default();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Upload assets to S3 using presigned URLs, skipping unchanged files via HEAD check
+async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset]) -> (usize, usize) {
+    let client = reqwest::Client::new();
+    let mut uploaded = 0;
+    let mut skipped = 0;
+
+    for asset_url in presigned {
+        if let Some((_, content, ct, hash_hex)) =
+            assets.iter().find(|(p, _, _, _)| p == &asset_url.path)
+        {
+            let hash_b64 = hex_to_base64(hash_hex);
+
+            // HEAD check: compare x-amz-checksum-sha256 with local hash
+            if let Ok(resp) = client.head(&asset_url.head_url).send().await {
+                if resp.status().is_success() {
+                    if let Some(remote_hash) = resp.headers().get("x-amz-checksum-sha256") {
+                        if remote_hash.to_str().unwrap_or("") == hash_b64 {
+                            skipped += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Upload
+            match client
+                .put(&asset_url.put_url)
+                .header("Content-Type", ct.as_str())
+                .header("Content-Length", content.len())
+                .header("x-amz-checksum-sha256", &hash_b64)
+                .body(content.clone())
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    println!("  {} {}", "⎿".dimmed(), asset_url.path);
+                    uploaded += 1;
+                }
+                Ok(resp) => eprintln!(
+                    "  {} {} (HTTP {})",
+                    "⎿".red(),
+                    asset_url.path,
+                    resp.status()
+                ),
+                Err(e) => eprintln!("  {} {} ({})", "⎿".red(), asset_url.path, e),
+            }
+        }
+    }
+
+    (uploaded, skipped)
 }
 
 fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {
@@ -377,6 +543,13 @@ fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {
                 .strip_prefix(base)
                 .map_err(|e| BackendError::Api(format!("Path error: {}", e)))?;
 
+            // Skip assets/ directory — assets are uploaded separately via presigned URLs
+            let relative_str = relative.to_string_lossy();
+
+            if relative_str == "assets" || relative_str.starts_with("assets/") {
+                continue;
+            }
+
             if path.is_dir() {
                 add_directory(zip, &path, base, options)?;
             } else {
@@ -384,7 +557,7 @@ fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {
                     BackendError::Api(format!("Failed to read file '{}': {}", path.display(), e))
                 })?;
 
-                let relative_path = relative.to_string_lossy().replace('\\', "/");
+                let relative_path = relative_str.replace('\\', "/");
                 zip.start_file(relative_path, options)
                     .map_err(|e| BackendError::Api(format!("Zip error: {}", e)))?;
 

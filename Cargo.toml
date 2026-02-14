@@ -1,6 +1,6 @@
 [package]
 name = "openworkers-cli"
-version = "0.2.15"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "CLI for OpenWorkers - Self-hosted Cloudflare Workers runtime"
@@ -51,6 +51,7 @@ uuid = { version = "1", features = ["serde"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "multipart"] }
 sha2 = "0.10"
 hex = "0.4"
+base64 = "0.22"
 zip = { version = "7", default-features = false, features = ["deflate"] }
 hmac = "0.12"
 mime_guess = "2"

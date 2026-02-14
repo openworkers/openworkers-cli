@@ -1,8 +1,8 @@
 use super::{
-    Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput, CreateKvInput,
-    CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment, Environment,
-    KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult,
-    UploadWorkerInfo, UploadedCounts, Worker,
+    AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
+    CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment,
+    Environment, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
+    UploadResult, UploadWorkerInfo, Worker,
 };
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -184,6 +184,7 @@ impl Backend for MockBackend {
         &self,
         name: &str,
         _zip_data: Vec<u8>,
+        _assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
         let state = self.state.lock().unwrap();
 
@@ -199,10 +200,8 @@ impl Backend for MockBackend {
                 name: worker.name.clone(),
                 url: format!("https://{}.workers.rocks", worker.name),
             },
-            uploaded: UploadedCounts {
-                script: true,
-                assets: 0,
-            },
+            deployed: None,
+            assets: None,
         })
     }
 
