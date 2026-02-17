@@ -462,17 +462,31 @@ fn hex_to_base64(hex_str: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// Upload assets to S3 using presigned URLs, skipping unchanged files via HEAD check
+/// Upload assets to S3 using presigned URLs, skipping unchanged files via HEAD check.
+/// Runs up to 10 concurrent uploads.
 async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset]) -> (usize, usize) {
-    let client = reqwest::Client::new();
-    let mut uploaded = 0;
-    let mut skipped = 0;
+    use futures::stream::{self, StreamExt};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    for asset_url in presigned {
-        if let Some((_, content, ct, hash_hex)) =
-            assets.iter().find(|(p, _, _, _)| p == &asset_url.path)
-        {
-            let hash_b64 = hex_to_base64(hash_hex);
+    let client = reqwest::Client::new();
+    let uploaded = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
+
+    stream::iter(presigned.iter().filter_map(|asset_url| {
+        assets
+            .iter()
+            .find(|(p, _, _, _)| p == &asset_url.path)
+            .map(|(_, content, ct, hash_hex)| {
+                (asset_url, content.clone(), ct.clone(), hash_hex.clone())
+            })
+    }))
+    .for_each_concurrent(10, |(asset_url, content, ct, hash_hex)| {
+        let client = &client;
+        let uploaded = &uploaded;
+        let skipped = &skipped;
+
+        async move {
+            let hash_b64 = hex_to_base64(&hash_hex);
 
             // HEAD check: compare checksum and etag
             let mut checksum_match = false;
@@ -493,10 +507,10 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
                     "  {} {} {}",
                     "⎿".dimmed(),
                     asset_url.path,
-                    format!("(skipped, checksum match)").dimmed()
+                    "(skipped, checksum match)".dimmed()
                 );
-                skipped += 1;
-                continue;
+                skipped.fetch_add(1, Ordering::Relaxed);
+                return;
             }
 
             // Upload
@@ -505,7 +519,7 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
                 .header("Content-Type", ct.as_str())
                 .header("Content-Length", content.len())
                 .header("x-amz-checksum-sha256", &hash_b64)
-                .body(content.clone())
+                .body(content)
                 .send()
                 .await
             {
@@ -516,7 +530,7 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
                         "new"
                     };
                     println!("  {} {} ({})", "⎿".dimmed(), asset_url.path, reason);
-                    uploaded += 1;
+                    uploaded.fetch_add(1, Ordering::Relaxed);
                 }
                 Ok(resp) => eprintln!(
                     "  {} {} (HTTP {})",
@@ -527,9 +541,13 @@ async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset])
                 Err(e) => eprintln!("  {} {} ({})", "⎿".red(), asset_url.path, e),
             }
         }
-    }
+    })
+    .await;
 
-    (uploaded, skipped)
+    (
+        uploaded.load(Ordering::Relaxed),
+        skipped.load(Ordering::Relaxed),
+    )
 }
 
 fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {

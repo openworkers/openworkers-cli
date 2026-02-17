@@ -354,49 +354,7 @@ impl Backend for DbBackend {
             .parse()
             .map_err(|_| BackendError::Api(format!("Invalid worker ID: {}", worker.id)))?;
 
-        // 2. Check for ASSETS binding (like API does)
-        let assets_binding = sqlx::query(
-            r#"
-            SELECT
-                sc.bucket,
-                sc.prefix,
-                sc.access_key_id,
-                sc.secret_access_key,
-                sc.endpoint,
-                sc.region
-            FROM workers w
-            JOIN environment_values ev ON ev.environment_id = w.environment_id
-            JOIN storage_configs sc ON sc.id = ev.value::uuid
-            WHERE w.id = $1 AND w.user_id = $2 AND ev.type = 'assets'
-            LIMIT 1
-            "#,
-        )
-        .bind(worker_id)
-        .bind(self.user_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
-            BackendError::Api(
-                "Worker has no ASSETS binding. Add an assets binding to the worker environment first.".to_string(),
-            )
-        })?;
-
-        // 3. Get storage credentials from binding, with platform endpoint as fallback
-        let bucket: String = assets_binding.get("bucket");
-        let prefix: Option<String> = assets_binding.get("prefix");
-        let access_key_id: String = assets_binding.get("access_key_id");
-        let secret_access_key: String = assets_binding.get("secret_access_key");
-        let region: String = assets_binding
-            .get::<Option<String>, _>("region")
-            .unwrap_or_else(|| "auto".to_string());
-
-        // Use binding's endpoint, or fall back to platform storage endpoint
-        let binding_endpoint: Option<String> = assets_binding.get("endpoint");
-        let endpoint = binding_endpoint
-            .or_else(|| self.platform_storage.as_ref().map(|ps| ps.endpoint.clone()))
-            .ok_or_else(|| BackendError::Api("Storage endpoint not configured".to_string()))?;
-
-        // 4. Extract zip
+        // 2. Extract zip
         let cursor = std::io::Cursor::new(zip_data);
         let mut archive = ZipArchive::new(cursor)
             .map_err(|e| BackendError::Api(format!("Failed to read zip archive: {}", e)))?;
@@ -548,23 +506,65 @@ impl Backend for DbBackend {
             eprintln!("  Created {} function workers", functions_created);
         }
 
-        // 7. Upload assets to S3
-        let s3_client = S3Client::new(S3Config {
-            bucket,
-            endpoint,
-            access_key_id,
-            secret_access_key,
-            region,
-            prefix,
-        });
+        // 7. Upload assets to S3 (only if zip contained assets)
+        if !assets.is_empty() {
+            let assets_binding = sqlx::query(
+                r#"
+                SELECT
+                    sc.bucket,
+                    sc.prefix,
+                    sc.access_key_id,
+                    sc.secret_access_key,
+                    sc.endpoint,
+                    sc.region
+                FROM workers w
+                JOIN environment_values ev ON ev.environment_id = w.environment_id
+                JOIN storage_configs sc ON sc.id = ev.value::uuid
+                WHERE w.id = $1 AND w.user_id = $2 AND ev.type = 'assets'
+                LIMIT 1
+                "#,
+            )
+            .bind(worker_id)
+            .bind(self.user_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| {
+                BackendError::Api(
+                    "Worker has no ASSETS binding. Add an assets binding to the worker environment first."
+                        .to_string(),
+                )
+            })?;
 
-        for (path, content) in assets {
-            let content_type = get_mime_type(&path);
+            let bucket: String = assets_binding.get("bucket");
+            let prefix: Option<String> = assets_binding.get("prefix");
+            let access_key_id: String = assets_binding.get("access_key_id");
+            let secret_access_key: String = assets_binding.get("secret_access_key");
+            let region: String = assets_binding
+                .get::<Option<String>, _>("region")
+                .unwrap_or_else(|| "auto".to_string());
 
-            match s3_client.put(&path, content, content_type).await {
-                Ok(true) => {}
-                Ok(false) => eprintln!("Failed to upload {}", path),
-                Err(e) => eprintln!("Error uploading {}: {}", path, e),
+            let binding_endpoint: Option<String> = assets_binding.get("endpoint");
+            let endpoint = binding_endpoint
+                .or_else(|| self.platform_storage.as_ref().map(|ps| ps.endpoint.clone()))
+                .ok_or_else(|| BackendError::Api("Storage endpoint not configured".to_string()))?;
+
+            let s3_client = S3Client::new(S3Config {
+                bucket,
+                endpoint,
+                access_key_id,
+                secret_access_key,
+                region,
+                prefix,
+            });
+
+            for (path, content) in assets {
+                let content_type = get_mime_type(&path);
+
+                match s3_client.put(&path, content, content_type).await {
+                    Ok(true) => {}
+                    Ok(false) => eprintln!("Failed to upload {}", path),
+                    Err(e) => eprintln!("Error uploading {}: {}", path, e),
+                }
             }
         }
 
@@ -845,6 +845,40 @@ impl Backend for DbBackend {
         &self,
         input: CreateStorageInput,
     ) -> Result<StorageConfig, BackendError> {
+        // Handle platform provider - use platform storage config
+        let (bucket, prefix, access_key_id, secret_access_key, endpoint, region, public_url) =
+            if input.provider == "platform" {
+                let ps = self.platform_storage.as_ref().ok_or_else(|| {
+                    BackendError::Api(
+                        "Platform storage not configured. Use 'ow setup-storage' to configure it."
+                            .to_string(),
+                    )
+                })?;
+
+                // Generate unique prefix for this storage config
+                let prefix = Some(uuid::Uuid::new_v4().to_string());
+
+                (
+                    Some(ps.bucket.clone()),
+                    prefix,
+                    Some(ps.access_key_id.clone()),
+                    Some(ps.secret_access_key.clone()),
+                    Some(ps.endpoint.clone()),
+                    Some(ps.region.clone()),
+                    None, // public_url not in PlatformStorageConfig
+                )
+            } else {
+                (
+                    input.bucket,
+                    input.prefix,
+                    input.access_key_id,
+                    input.secret_access_key,
+                    input.endpoint,
+                    input.region,
+                    input.public_url,
+                )
+            };
+
         let row = sqlx::query(
             r#"
             INSERT INTO storage_configs (name, "desc", user_id, bucket, prefix, access_key_id, secret_access_key, endpoint, region, public_url)
@@ -855,13 +889,13 @@ impl Backend for DbBackend {
         .bind(&input.name)
         .bind(&input.desc)
         .bind(self.user_id)
-        .bind(&input.bucket)
-        .bind(&input.prefix)
-        .bind(&input.access_key_id)
-        .bind(&input.secret_access_key)
-        .bind(&input.endpoint)
-        .bind(&input.region)
-        .bind(&input.public_url)
+        .bind(&bucket)
+        .bind(&prefix)
+        .bind(&access_key_id)
+        .bind(&secret_access_key)
+        .bind(&endpoint)
+        .bind(&region)
+        .bind(&public_url)
         .fetch_one(&self.pool)
         .await?;
 

@@ -218,6 +218,35 @@ enum Commands {
         #[arg(long)]
         prefix: Option<String>,
     },
+
+    /// Test latency to the configured backend
+    #[command(after_help = "Examples:\n  \
+        ow test-latency              Test request latency (reuses connection)\n  \
+        ow test-latency --connect    Test connection latency (new connection each time)\n  \
+        ow local test-latency -n 20  Test with 20 iterations")]
+    TestLatency {
+        /// Test connection latency instead of request latency (new connection each time)
+        #[arg(short, long)]
+        connect: bool,
+
+        /// Number of iterations (default: 10)
+        #[arg(short = 'n', long, default_value = "10")]
+        count: usize,
+
+        /// Timeout in seconds (default: 5)
+        #[arg(short, long, default_value = "5")]
+        timeout: u64,
+    },
+
+    #[cfg(feature = "mcp")]
+    /// Start MCP server (Model Context Protocol) on stdio
+    #[command(after_help = "Examples:\n  \
+        ow mcp                Start MCP server with default alias\n  \
+        ow local mcp          Start MCP server with 'local' alias\n  \
+        ow prod mcp           Start MCP server with 'prod' alias\n\n\
+        The MCP server exposes CLI commands as tools for AI assistants.\n\
+        It communicates via stdio using the Model Context Protocol.")]
+    Mcp,
 }
 
 /// Extract alias from args if first arg matches a known alias.
@@ -234,6 +263,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         return (None, args);
     }
 
+    #[cfg(feature = "mcp")]
     let known_commands = [
         // Main commands
         "alias",
@@ -246,6 +276,47 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "kv",
         "databases",
         "setup-storage",
+        "test-latency",
+        "mcp",
+        // Short aliases
+        "u",
+        "w",
+        "e",
+        "s",
+        "k",
+        "d",
+        // Singular/plural variants (for flexibility)
+        "user",
+        "worker",
+        "envs",
+        "environment",
+        "environments",
+        "storages",
+        "kvs",
+        "db",
+        "database",
+        // Help flags
+        "help",
+        "--help",
+        "-h",
+        "--version",
+        "-v",
+    ];
+
+    #[cfg(not(feature = "mcp"))]
+    let known_commands = [
+        // Main commands
+        "alias",
+        "login",
+        "migrate",
+        "users",
+        "workers",
+        "env",
+        "storage",
+        "kv",
+        "databases",
+        "setup-storage",
+        "test-latency",
         // Short aliases
         "u",
         "w",
@@ -544,6 +615,13 @@ async fn main() {
         Commands::Storage { command } => run_storage_command(alias, command).await,
         Commands::Kv { command } => run_kv_command(alias, command).await,
         Commands::Databases { command } => run_databases_command(alias, command).await,
+        Commands::TestLatency {
+            connect,
+            count,
+            timeout,
+        } => commands::latency::run(alias, connect, count, timeout)
+            .await
+            .map_err(|e| e.to_string()),
         Commands::SetupStorage {
             endpoint,
             bucket,
@@ -560,6 +638,9 @@ async fn main() {
             region,
             prefix,
         ),
+
+        #[cfg(feature = "mcp")]
+        Commands::Mcp => commands::mcp::run(alias).await.map_err(|e| e.to_string()),
     };
 
     if let Err(e) = result {

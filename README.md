@@ -193,6 +193,83 @@ ow dev workers get my-api # Uses 'dev' alias
 
 Config stored in `~/.openworkers/config.json`.
 
+## Model Context Protocol (MCP)
+
+OpenWorkers CLI includes an MCP server that exposes CLI commands as tools for AI assistants like Claude.
+
+**Available tools:**
+- Workers: list, get, create, deploy, delete, link
+- Environments: list, set variables/secrets, bind resources
+- KV: list, create, delete
+- Storage: list, create, delete
+- Databases: list, create, delete
+
+### Setup for Claude CLI
+
+Create `.mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "openworkers": {
+      "command": "ow",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or with a specific alias:
+
+```json
+{
+  "mcpServers": {
+    "openworkers": {
+      "command": "ow",
+      "args": ["local", "mcp"]
+    }
+  }
+}
+```
+
+Run `claude` in your project directory and enable the OpenWorkers server when prompted.
+
+### Setup for Claude Desktop
+
+Edit Claude Desktop config file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+Add:
+
+```json
+{
+  "mcpServers": {
+    "openworkers": {
+      "command": "ow",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The 🔨 icon indicates MCP tools are available.
+
+### Usage
+
+Once configured, you can use natural language:
+
+> "List my OpenWorkers workers"
+>
+> "Create a new worker called my-api"
+>
+> "Deploy worker.ts to my-api"
+
+Claude will automatically use the appropriate MCP tools.
+
+**Note:** The MCP server uses your configured alias for authentication. Ensure you have set up an alias and logged in before using MCP tools.
+
 ## Migrations
 
 Database schema migrations for self-hosted deployments. Requires a DB alias.
