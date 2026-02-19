@@ -1,7 +1,7 @@
 use super::{
     AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
     CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment,
-    Environment, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
+    Environment, KvNamespace, Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
     UploadResult, UploadWorkerInfo, Worker,
 };
 use chrono::Utc;
@@ -135,6 +135,14 @@ impl Backend for MockBackend {
         Ok(worker.clone())
     }
 
+    async fn link_worker_environment(
+        &self,
+        _worker_id: &str,
+        _environment_id: &str,
+    ) -> Result<(), BackendError> {
+        Ok(())
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -183,6 +191,7 @@ impl Backend for MockBackend {
     async fn upload_worker(
         &self,
         name: &str,
+        _path: &std::path::Path,
         _zip_data: Vec<u8>,
         _assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
@@ -202,7 +211,16 @@ impl Backend for MockBackend {
             },
             deployed: None,
             assets: None,
+            direct_upload: None,
         })
+    }
+
+    async fn list_projects(&self) -> Result<Vec<Project>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn delete_project(&self, _name: &str) -> Result<(), BackendError> {
+        Ok(())
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {

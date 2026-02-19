@@ -35,6 +35,17 @@ pub struct WorkerEnvironmentRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    #[serde(alias = "desc")]
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Worker {
     pub id: String,
     pub name: String,
@@ -91,6 +102,18 @@ pub struct UploadResult {
     pub worker: UploadWorkerInfo,
     pub deployed: Option<DeployedInfo>,
     pub assets: Option<Vec<PresignedAsset>>,
+    #[serde(skip)]
+    pub direct_upload: Option<DirectUploadConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DirectUploadConfig {
+    pub bucket: String,
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub region: String,
+    pub prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +262,24 @@ pub struct CreateKvInput {
 }
 
 // Database types
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type, clap::ValueEnum)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[sqlx(type_name = "enum_database_provider", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseProvider {
+    Platform,
+    Postgres,
+}
+
+impl std::fmt::Display for DatabaseProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseProvider::Platform => write!(f, "platform"),
+            DatabaseProvider::Postgres => write!(f, "postgres"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Database {
@@ -246,7 +287,7 @@ pub struct Database {
     pub name: String,
     #[serde(alias = "desc")]
     pub description: Option<String>,
-    pub provider: String,
+    pub provider: DatabaseProvider,
     pub max_rows: i32,
     pub timeout_seconds: i32,
     pub created_at: DateTime<Utc>,
@@ -259,7 +300,7 @@ pub struct CreateDatabaseInput {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
-    pub provider: String,
+    pub provider: DatabaseProvider,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_string: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -299,6 +340,12 @@ pub trait Backend: Send + Sync {
         input: UpdateWorkerInput,
     ) -> impl std::future::Future<Output = Result<Worker, BackendError>> + Send;
 
+    fn link_worker_environment(
+        &self,
+        worker_id: &str,
+        environment_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
+
     fn deploy_worker(
         &self,
         name: &str,
@@ -308,9 +355,20 @@ pub trait Backend: Send + Sync {
     fn upload_worker(
         &self,
         name: &str,
+        path: &std::path::Path,
         zip_data: Vec<u8>,
         assets_manifest: &[AssetManifestEntry],
     ) -> impl std::future::Future<Output = Result<UploadResult, BackendError>> + Send;
+
+    // Project methods
+    fn list_projects(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<Project>, BackendError>> + Send;
+
+    fn delete_project(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
 
     // Environment methods
     fn list_environments(

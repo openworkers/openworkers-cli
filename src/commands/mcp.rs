@@ -9,7 +9,8 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::backend::{
     Backend, CreateDatabaseInput, CreateKvInput, CreateStorageInput, CreateWorkerInput,
-    DeployInput, EnvironmentValueInput, UpdateEnvironmentInput, api::ApiBackend, db::DbBackend,
+    DatabaseProvider, DeployInput, EnvironmentValueInput, UpdateEnvironmentInput, api::ApiBackend,
+    db::DbBackend,
 };
 use crate::config::{AliasConfig, Config};
 
@@ -169,7 +170,7 @@ struct DatabasesListRequest {}
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct DatabasesCreateRequest {
     name: String,
-    provider: String,
+    provider: DatabaseProvider,
     #[serde(skip_serializing_if = "Option::is_none")]
     connection_string: Option<String>,
 }

@@ -1,8 +1,7 @@
 use crate::backend::{
-    AssetManifestEntry, Backend, BackendError, CreateWorkerInput, DeployInput, PresignedAsset,
-    UpdateWorkerInput, Worker,
+    AssetManifestEntry, Backend, BackendError, CreateWorkerInput, DeployInput, Worker,
 };
-use crate::s3::get_mime_type;
+use crate::s3::{self, PresignedClient, S3Client, S3Config, get_mime_type};
 use clap::Subcommand;
 use colored::Colorize;
 use std::path::PathBuf;
@@ -267,15 +266,12 @@ async fn cmd_deploy<B: Backend>(
 }
 
 async fn cmd_link<B: Backend>(backend: &B, name: &str, env: &str) -> Result<(), BackendError> {
-    // Verify environment exists
+    let worker = backend.get_worker(name).await?;
     let environment = backend.get_environment(env).await?;
 
-    let input = UpdateWorkerInput {
-        name: None,
-        environment: Some(environment.id),
-    };
-
-    backend.update_worker(name, input).await?;
+    backend
+        .link_worker_environment(&worker.id, &environment.id)
+        .await?;
 
     println!(
         "{} Worker '{}' linked to environment '{}'.",
@@ -334,12 +330,30 @@ async fn cmd_upload<B: Backend>(
         assets.len()
     );
 
-    let result = backend.upload_worker(name, zip_data, &manifest).await?;
+    let result = backend
+        .upload_worker(name, &path, zip_data, &manifest)
+        .await?;
 
-    // Upload assets via presigned URLs if returned by API
+    // Upload assets (presigned URLs from API, or direct S3 from DB backend)
     let (uploaded_assets, skipped_assets) = if let Some(ref presigned) = result.assets {
         println!("{} Checking {} assets...", "→".blue(), presigned.len());
-        upload_assets_presigned(presigned, &assets).await
+        let urls = presigned
+            .iter()
+            .map(|a| (a.path.clone(), (a.head_url.clone(), a.put_url.clone())))
+            .collect();
+        let client = PresignedClient::new(urls);
+        s3::upload_assets(&client, &assets).await
+    } else if let Some(ref config) = result.direct_upload {
+        println!("{} Checking {} assets...", "→".blue(), assets.len());
+        let client = S3Client::new(S3Config {
+            bucket: config.bucket.clone(),
+            endpoint: config.endpoint.clone(),
+            access_key_id: config.access_key_id.clone(),
+            secret_access_key: config.secret_access_key.clone(),
+            region: config.region.clone(),
+            prefix: config.prefix.clone(),
+        });
+        s3::upload_assets(&client, &assets).await
     } else {
         (0, 0)
     };
@@ -379,7 +393,7 @@ async fn cmd_upload<B: Backend>(
         }
     }
 
-    if result.assets.is_some() {
+    if uploaded_assets > 0 || skipped_assets > 0 {
         if skipped_assets > 0 {
             println!(
                 "{:12} {} uploaded, {} unchanged",
@@ -390,9 +404,6 @@ async fn cmd_upload<B: Backend>(
         } else {
             println!("{:12} {} uploaded", "Assets:".dimmed(), uploaded_assets);
         }
-    } else if !assets.is_empty() {
-        // DB backend uploaded directly
-        println!("{:12} {} files", "Assets:".dimmed(), assets.len());
     }
 
     Ok(())
@@ -452,102 +463,6 @@ fn collect_assets_recursive(
     }
 
     Ok(())
-}
-
-/// Convert a hex hash to base64 (for S3 x-amz-checksum-sha256 header)
-fn hex_to_base64(hex_str: &str) -> String {
-    use base64::Engine;
-
-    let bytes = hex::decode(hex_str).unwrap_or_default();
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-/// Upload assets to S3 using presigned URLs, skipping unchanged files via HEAD check.
-/// Runs up to 10 concurrent uploads.
-async fn upload_assets_presigned(presigned: &[PresignedAsset], assets: &[Asset]) -> (usize, usize) {
-    use futures::stream::{self, StreamExt};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let client = reqwest::Client::new();
-    let uploaded = AtomicUsize::new(0);
-    let skipped = AtomicUsize::new(0);
-
-    stream::iter(presigned.iter().filter_map(|asset_url| {
-        assets
-            .iter()
-            .find(|(p, _, _, _)| p == &asset_url.path)
-            .map(|(_, content, ct, hash_hex)| {
-                (asset_url, content.clone(), ct.clone(), hash_hex.clone())
-            })
-    }))
-    .for_each_concurrent(10, |(asset_url, content, ct, hash_hex)| {
-        let client = &client;
-        let uploaded = &uploaded;
-        let skipped = &skipped;
-
-        async move {
-            let hash_b64 = hex_to_base64(&hash_hex);
-
-            // HEAD check: compare checksum and etag
-            let mut checksum_match = false;
-            let mut etag_match = false;
-
-            if let Ok(resp) = client.head(&asset_url.head_url).send().await {
-                if resp.status().is_success() {
-                    if let Some(remote_hash) = resp.headers().get("x-amz-checksum-sha256") {
-                        checksum_match = remote_hash.to_str().unwrap_or("") == hash_b64;
-                    }
-
-                    etag_match = resp.headers().get("etag").is_some();
-                }
-            }
-
-            if checksum_match {
-                println!(
-                    "  {} {} {}",
-                    "⎿".dimmed(),
-                    asset_url.path,
-                    "(skipped, checksum match)".dimmed()
-                );
-                skipped.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-
-            // Upload
-            match client
-                .put(&asset_url.put_url)
-                .header("Content-Type", ct.as_str())
-                .header("Content-Length", content.len())
-                .header("x-amz-checksum-sha256", &hash_b64)
-                .body(content)
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    let reason = if etag_match {
-                        "checksum changed"
-                    } else {
-                        "new"
-                    };
-                    println!("  {} {} ({})", "⎿".dimmed(), asset_url.path, reason);
-                    uploaded.fetch_add(1, Ordering::Relaxed);
-                }
-                Ok(resp) => eprintln!(
-                    "  {} {} (HTTP {})",
-                    "⎿".red(),
-                    asset_url.path,
-                    resp.status()
-                ),
-                Err(e) => eprintln!("  {} {} ({})", "⎿".red(), asset_url.path, e),
-            }
-        }
-    })
-    .await;
-
-    (
-        uploaded.load(Ordering::Relaxed),
-        skipped.load(Ordering::Relaxed),
-    )
 }
 
 fn create_zip_from_folder(folder: &PathBuf) -> Result<Vec<u8>, BackendError> {

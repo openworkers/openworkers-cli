@@ -3,6 +3,7 @@
     "binstall",
     "chrono",
     "codegen",
+    "postgate",
     "prerendered",
     "psql",
     "reqwest",

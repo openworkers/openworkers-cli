@@ -1,7 +1,7 @@
 use super::{
     AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
     CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, Deployment,
-    Environment, KvNamespace, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
+    Environment, KvNamespace, Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
     UploadResult, Worker,
 };
 use crate::config::DEFAULT_API_URL;
@@ -175,6 +175,39 @@ impl Backend for ApiBackend {
         Ok(worker)
     }
 
+    async fn link_worker_environment(
+        &self,
+        worker_id: &str,
+        environment_id: &str,
+    ) -> Result<(), BackendError> {
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/workers/{}/link", worker_id),
+            )
+            .json(&serde_json::json!({ "environmentId": environment_id }))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BackendError::NotFound(format!(
+                "Worker '{}' or environment '{}' not found",
+                worker_id, environment_id
+            )));
+        }
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(BackendError::Unauthorized);
+        }
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(BackendError::Api(text));
+        }
+
+        Ok(())
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -209,6 +242,7 @@ impl Backend for ApiBackend {
     async fn upload_worker(
         &self,
         name: &str,
+        _path: &std::path::Path,
         zip_data: Vec<u8>,
         assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
@@ -257,6 +291,19 @@ impl Backend for ApiBackend {
 
         let result: UploadResult = response.json().await?;
         Ok(result)
+    }
+
+    // Project methods
+    async fn list_projects(&self) -> Result<Vec<Project>, BackendError> {
+        Err(BackendError::Api(
+            "Projects require DB access. Use a DB alias.".to_string(),
+        ))
+    }
+
+    async fn delete_project(&self, _name: &str) -> Result<(), BackendError> {
+        Err(BackendError::Api(
+            "Projects require DB access. Use a DB alias.".to_string(),
+        ))
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {

@@ -40,11 +40,15 @@ pub enum UsersCommand {
 
     /// Create a new user (bootstrap mode - no user required)
     #[command(after_help = "Examples:\n  \
-        ow local users create admin\n  \
-        ow local users create max")]
+        ow local users create max\n  \
+        ow local users create max --system")]
     Create {
         /// Username for the new user
         username: String,
+
+        /// Claim the system user (rename __system__ to this username)
+        #[arg(long)]
+        system: bool,
     },
 
     /// Delete a user
@@ -66,7 +70,7 @@ impl UsersCommand {
         match self {
             Self::List => cmd_list(&pool).await,
             Self::Get { username } => cmd_get(&pool, &username).await,
-            Self::Create { username } => cmd_create(&pool, username).await,
+            Self::Create { username, system } => cmd_create(&pool, username, system).await,
             Self::Delete { username } => cmd_delete(&pool, &username).await,
         }
     }
@@ -167,37 +171,58 @@ async fn cmd_get(pool: &PgPool, username: &str) -> Result<(), UsersError> {
     Ok(())
 }
 
-async fn cmd_create(pool: &PgPool, username: String) -> Result<(), UsersError> {
-    // Check if user already exists
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
+async fn cmd_create(pool: &PgPool, username: String, system: bool) -> Result<(), UsersError> {
+    if system {
+        // Rename the system user to claim it
+        let result = sqlx::query(
+            "UPDATE users SET username = $1 WHERE id = '00000000-0000-0000-0000-000000000000'",
+        )
+        .bind(&username)
+        .execute(pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(UsersError::UserNotFound("__system__".to_string()));
+        }
+
+        println!(
+            "{} System user renamed to '{}'.",
+            "Updated".green().bold(),
+            username.bold(),
+        );
+    } else {
+        // Check if user already exists
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
+                .bind(&username)
+                .fetch_one(pool)
+                .await?;
+
+        if exists {
+            return Err(UsersError::UserExists(username));
+        }
+
+        // Insert new user
+        let row = sqlx::query(
+            r#"
+            INSERT INTO users (username)
+            VALUES ($1)
+            RETURNING id, username, created_at
+            "#,
+        )
         .bind(&username)
         .fetch_one(pool)
         .await?;
 
-    if exists {
-        return Err(UsersError::UserExists(username));
+        let id: uuid::Uuid = row.get("id");
+
+        println!(
+            "{} User '{}' created (ID: {}).",
+            "Created".green().bold(),
+            username.bold(),
+            id.to_string().dimmed()
+        );
     }
-
-    // Insert new user
-    let row = sqlx::query(
-        r#"
-        INSERT INTO users (username)
-        VALUES ($1)
-        RETURNING id, username, created_at
-        "#,
-    )
-    .bind(&username)
-    .fetch_one(pool)
-    .await?;
-
-    let id: uuid::Uuid = row.get("id");
-
-    println!(
-        "{} User '{}' created (ID: {}).",
-        "Created".green().bold(),
-        username.bold(),
-        id.to_string().dimmed()
-    );
 
     println!("\n{} Set this user as default with:", "Next:".cyan().bold());
     println!(

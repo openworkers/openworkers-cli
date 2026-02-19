@@ -3,6 +3,7 @@ use crate::backend::{
 };
 use clap::Subcommand;
 use colored::Colorize;
+use std::io::{self, Write};
 
 #[derive(Subcommand)]
 pub enum EnvCommand {
@@ -40,7 +41,8 @@ pub enum EnvCommand {
     /// Set a variable or secret in an environment
     #[command(after_help = "Examples:\n  \
         ow env set prod API_URL https://api.example.com\n  \
-        ow env set prod API_KEY sk-xxx --secret")]
+        ow env set prod API_KEY --secret\n  \
+        ow env set prod DB_URL")]
     Set {
         /// Environment name
         env: String,
@@ -48,8 +50,8 @@ pub enum EnvCommand {
         /// Variable name (conventionally UPPER_SNAKE_CASE)
         key: String,
 
-        /// Variable value
-        value: String,
+        /// Variable value (prompted interactively if omitted, masked for secrets)
+        value: Option<String>,
 
         /// Store as secret (value is encrypted and masked in output)
         #[arg(short, long)]
@@ -100,7 +102,29 @@ impl EnvCommand {
                 key,
                 value,
                 secret,
-            } => cmd_set(backend, &env, &key, &value, secret).await,
+            } => {
+                let value = match value {
+                    Some(v) => v,
+                    None if secret => {
+                        eprint!("{}: ", "Enter secret value".dimmed());
+                        io::stderr().flush().ok();
+                        rpassword::read_password().map_err(|e| {
+                            BackendError::Api(format!("Failed to read input: {}", e))
+                        })?
+                    }
+                    None => {
+                        eprint!("{}: ", "Enter value".dimmed());
+                        io::stderr().flush().ok();
+                        let mut buf = String::new();
+                        io::stdin().read_line(&mut buf).map_err(|e| {
+                            BackendError::Api(format!("Failed to read input: {}", e))
+                        })?;
+                        buf.trim_end().to_string()
+                    }
+                };
+
+                cmd_set(backend, &env, &key, &value, secret).await
+            }
             Self::Unset { env, key } => cmd_unset(backend, &env, &key).await,
             Self::Bind {
                 env,
@@ -200,7 +224,13 @@ async fn cmd_get<B: Backend>(backend: &B, name: &str) -> Result<(), BackendError
                 _ => format!("[{}]", val.value_type).dimmed(),
             };
 
-            println!("  {} {} = {}", type_badge, val.key.bold(), val.value);
+            let display_value = if val.value_type == "secret" {
+                "****".to_string()
+            } else {
+                val.value.clone()
+            };
+
+            println!("  {} {} = {}", type_badge, val.key.bold(), display_value);
         }
     }
 

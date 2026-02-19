@@ -15,6 +15,7 @@ use commands::databases::DatabasesCommand;
 use commands::env::EnvCommand;
 use commands::kv::KvCommand;
 use commands::migrate::MigrateCommand;
+use commands::projects::ProjectsCommand;
 use commands::storage::StorageCommand;
 use commands::users::UsersCommand;
 use commands::workers::WorkersCommand;
@@ -125,6 +126,19 @@ enum Commands {
     Workers {
         #[command(subcommand)]
         command: WorkersCommand,
+    },
+
+    /// Manage projects (multi-worker deployments)
+    #[command(
+        visible_alias = "p",
+        alias = "project",
+        after_help = "Examples:\n  \
+        ow projects list                       List all projects\n  \
+        ow projects delete my-app              Delete project and all its workers"
+    )]
+    Projects {
+        #[command(subcommand)]
+        command: ProjectsCommand,
     },
 
     /// Manage environments with variables, secrets, and bindings
@@ -403,6 +417,39 @@ async fn run_workers_command(alias: Option<String>, command: WorkersCommand) -> 
     }
 }
 
+async fn run_projects_command(
+    alias: Option<String>,
+    command: ProjectsCommand,
+) -> Result<(), String> {
+    let alias_config = resolve_alias(alias)?;
+
+    match alias_config {
+        AliasConfig::Db {
+            database_url, user, ..
+        } => {
+            let pool = PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let backend = DbBackend::new(pool, user, None)
+                .await
+                .map_err(format_backend_error)?;
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+
+        AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } => {
+            let backend = ApiBackend::new(url, token, insecure);
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+    }
+}
+
 async fn run_env_command(alias: Option<String>, command: EnvCommand) -> Result<(), String> {
     let alias_config = resolve_alias(alias)?;
 
@@ -438,7 +485,9 @@ async fn run_storage_command(alias: Option<String>, command: StorageCommand) -> 
 
     match alias_config {
         AliasConfig::Db {
-            database_url, user, ..
+            database_url,
+            user,
+            storage,
         } => {
             let pool = PgPoolOptions::new()
                 .max_connections(1)
@@ -446,7 +495,7 @@ async fn run_storage_command(alias: Option<String>, command: StorageCommand) -> 
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let backend = DbBackend::new(pool, user, None)
+            let backend = DbBackend::new(pool, user, storage)
                 .await
                 .map_err(format_backend_error)?;
             command.run(&backend).await.map_err(format_backend_error)
@@ -611,6 +660,7 @@ async fn main() {
         Commands::Migrate { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Users { command } => command.run(alias).await.map_err(|e| e.to_string()),
         Commands::Workers { command } => run_workers_command(alias, command).await,
+        Commands::Projects { command } => run_projects_command(alias, command).await,
         Commands::Env { command } => run_env_command(alias, command).await,
         Commands::Storage { command } => run_storage_command(alias, command).await,
         Commands::Kv { command } => run_kv_command(alias, command).await,

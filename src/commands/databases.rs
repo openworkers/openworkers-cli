@@ -1,4 +1,4 @@
-use crate::backend::{Backend, BackendError, CreateDatabaseInput};
+use crate::backend::{Backend, BackendError, CreateDatabaseInput, DatabaseProvider};
 use clap::Subcommand;
 use colored::Colorize;
 
@@ -26,8 +26,8 @@ pub enum DatabasesCommand {
         name: String,
 
         /// Database provider: platform (managed) or postgres (bring your own)
-        #[arg(long, default_value = "platform")]
-        provider: String,
+        #[arg(long, value_enum, default_value = "platform")]
+        provider: DatabaseProvider,
 
         /// PostgreSQL connection string (required for postgres provider)
         #[arg(long)]
@@ -95,10 +95,9 @@ async fn cmd_list<B: Backend>(backend: &B) -> Result<(), BackendError> {
     println!("{}", "─".repeat(60));
 
     for db in databases {
-        let provider_badge = match db.provider.as_str() {
-            "platform" => "[platform]".cyan(),
-            "postgres" => "[postgres]".yellow(),
-            _ => format!("[{}]", db.provider).dimmed(),
+        let provider_badge = match db.provider {
+            DatabaseProvider::Platform => "[platform]".cyan(),
+            DatabaseProvider::Postgres => "[postgres]".yellow(),
         };
 
         println!("  {} {:30}", provider_badge, db.name.bold());
@@ -133,13 +132,13 @@ async fn cmd_get<B: Backend>(backend: &B, name: &str) -> Result<(), BackendError
 async fn cmd_create<B: Backend>(
     backend: &B,
     name: String,
-    provider: String,
+    provider: DatabaseProvider,
     connection_string: Option<String>,
     description: Option<String>,
     max_rows: Option<i32>,
     timeout: Option<i32>,
 ) -> Result<(), BackendError> {
-    if provider == "postgres" && connection_string.is_none() {
+    if provider == DatabaseProvider::Postgres && connection_string.is_none() {
         return Err(BackendError::Api(
             "--connection-string is required for postgres provider".to_string(),
         ));

@@ -1,11 +1,11 @@
 use super::{
     AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
     CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, DeployedInfo,
-    Deployment, Environment, EnvironmentValue, KvNamespace, StorageConfig, UpdateEnvironmentInput,
-    UpdateWorkerInput, UploadResult, UploadWorkerInfo, Worker,
+    Deployment, DirectUploadConfig, Environment, EnvironmentValue, KvNamespace, Project,
+    StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, UploadWorkerInfo,
+    Worker,
 };
 use crate::config::PlatformStorageConfig;
-use crate::s3::{S3Client, S3Config, get_mime_type};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -281,6 +281,28 @@ impl Backend for DbBackend {
         self.get_worker(name).await
     }
 
+    async fn link_worker_environment(
+        &self,
+        worker_id: &str,
+        environment_id: &str,
+    ) -> Result<(), BackendError> {
+        let worker_uuid: uuid::Uuid = worker_id
+            .parse()
+            .map_err(|_| BackendError::NotFound(format!("Invalid worker ID '{}'", worker_id)))?;
+
+        let env_uuid: uuid::Uuid = environment_id.parse().map_err(|_| {
+            BackendError::NotFound(format!("Invalid environment ID '{}'", environment_id))
+        })?;
+
+        sqlx::query("SELECT link_worker_environment($1, $2)")
+            .bind(worker_uuid)
+            .bind(env_uuid)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     async fn deploy_worker(
         &self,
         name: &str,
@@ -344,8 +366,9 @@ impl Backend for DbBackend {
     async fn upload_worker(
         &self,
         name: &str,
+        _path: &std::path::Path,
         zip_data: Vec<u8>,
-        _assets_manifest: &[AssetManifestEntry],
+        assets_manifest: &[AssetManifestEntry],
     ) -> Result<UploadResult, BackendError> {
         // 1. Get worker by name
         let worker = self.get_worker(name).await?;
@@ -354,14 +377,13 @@ impl Backend for DbBackend {
             .parse()
             .map_err(|_| BackendError::Api(format!("Invalid worker ID: {}", worker.id)))?;
 
-        // 2. Extract zip
+        // 2. Extract code from zip (worker script, routes, functions)
         let cursor = std::io::Cursor::new(zip_data);
         let mut archive = ZipArchive::new(cursor)
             .map_err(|e| BackendError::Api(format!("Failed to read zip archive: {}", e)))?;
 
         let mut worker_script: Option<String> = None;
         let mut language = "javascript";
-        let mut assets: Vec<(String, Vec<u8>)> = Vec::new();
         let mut routes_json: Option<String> = None;
         let mut function_scripts: HashMap<String, String> = HashMap::new();
 
@@ -411,7 +433,6 @@ impl Backend for DbBackend {
                 })?;
                 routes_json = Some(content);
             } else if filename.contains("functions/") && filename.ends_with(".js") {
-                // Extract path starting from "functions/"
                 if let Some(pos) = filename.find("functions/") {
                     let func_path = &filename[pos..];
                     let mut content = String::new();
@@ -420,19 +441,6 @@ impl Backend for DbBackend {
                     })?;
                     function_scripts.insert(func_path.to_string(), content);
                 }
-            } else if filename.contains("assets/") {
-                // Extract asset path after "assets/"
-                if let Some(pos) = filename.find("assets/") {
-                    let asset_path = &filename[pos + 7..];
-
-                    if !asset_path.is_empty() {
-                        let mut content = Vec::new();
-                        file.read_to_end(&mut content).map_err(|e| {
-                            BackendError::Api(format!("Failed to read asset: {}", e))
-                        })?;
-                        assets.push((asset_path.to_string(), content));
-                    }
-                }
             }
         }
 
@@ -440,13 +448,12 @@ impl Backend for DbBackend {
             BackendError::Api("No worker.js or worker.ts found in zip archive".to_string())
         })?;
 
-        // 5. Prepare deploy_project parameters
+        // 3. Prepare deploy_project parameters
         let script_bytes = script.as_bytes();
         let mut hasher = Sha256::new();
         hasher.update(script_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        // Build storage routes JSON array from _routes.json
         let mut storage_routes = Vec::new();
         let routes = if let Some(ref routes_content) = routes_json {
             let r: RoutesConfig = serde_json::from_str(routes_content)
@@ -469,7 +476,6 @@ impl Backend for DbBackend {
             None
         };
 
-        // Build function workers JSON array
         let mut function_workers = Vec::new();
 
         if let Some(ref routes) = routes {
@@ -483,7 +489,7 @@ impl Backend for DbBackend {
             }
         }
 
-        // 6. Call deploy_project — single DB round-trip for all routes + functions
+        // 4. Call deploy_project — single DB round-trip for all routes + functions
         let row = sqlx::query(
             r#"
             SELECT * FROM deploy_project($1, $2, $3, $4, $5::enum_code_type, $6::jsonb, $7::jsonb)
@@ -506,9 +512,9 @@ impl Backend for DbBackend {
             eprintln!("  Created {} function workers", functions_created);
         }
 
-        // 7. Upload assets to S3 (only if zip contained assets)
-        if !assets.is_empty() {
-            let assets_binding = sqlx::query(
+        // 5. Resolve ASSETS binding S3 config (upload happens in workers.rs)
+        let direct_upload = if !assets_manifest.is_empty() {
+            let row = sqlx::query(
                 r#"
                 SELECT
                     sc.bucket,
@@ -535,40 +541,26 @@ impl Backend for DbBackend {
                 )
             })?;
 
-            let bucket: String = assets_binding.get("bucket");
-            let prefix: Option<String> = assets_binding.get("prefix");
-            let access_key_id: String = assets_binding.get("access_key_id");
-            let secret_access_key: String = assets_binding.get("secret_access_key");
-            let region: String = assets_binding
-                .get::<Option<String>, _>("region")
-                .unwrap_or_else(|| "auto".to_string());
-
-            let binding_endpoint: Option<String> = assets_binding.get("endpoint");
+            let binding_endpoint: Option<String> = row.get("endpoint");
             let endpoint = binding_endpoint
                 .or_else(|| self.platform_storage.as_ref().map(|ps| ps.endpoint.clone()))
                 .ok_or_else(|| BackendError::Api("Storage endpoint not configured".to_string()))?;
 
-            let s3_client = S3Client::new(S3Config {
-                bucket,
+            Some(DirectUploadConfig {
+                bucket: row.get("bucket"),
                 endpoint,
-                access_key_id,
-                secret_access_key,
-                region,
-                prefix,
-            });
+                access_key_id: row.get("access_key_id"),
+                secret_access_key: row.get("secret_access_key"),
+                region: row
+                    .get::<Option<String>, _>("region")
+                    .unwrap_or_else(|| "auto".to_string()),
+                prefix: row.get("prefix"),
+            })
+        } else {
+            None
+        };
 
-            for (path, content) in assets {
-                let content_type = get_mime_type(&path);
-
-                match s3_client.put(&path, content, content_type).await {
-                    Ok(true) => {}
-                    Ok(false) => eprintln!("Failed to upload {}", path),
-                    Err(e) => eprintln!("Error uploading {}: {}", path, e),
-                }
-            }
-        }
-
-        // 8. Try to find custom domain for this worker or project
+        // 6. Try to find custom domain for this worker or project
         let custom_domain: Option<String> = sqlx::query_scalar(
             r#"
             SELECT name FROM domains
@@ -580,11 +572,9 @@ impl Backend for DbBackend {
         .fetch_optional(&self.pool)
         .await?;
 
-        // Build URL: custom domain if available, otherwise just worker name (no URL)
         let url = if let Some(domain) = custom_domain {
             format!("https://{}", domain)
         } else {
-            // No URL - will be handled by CLI layer
             name.to_string()
         };
 
@@ -600,7 +590,53 @@ impl Backend for DbBackend {
                 functions: functions_created,
             }),
             assets: None,
+            direct_upload,
         })
+    }
+
+    // Project methods
+    async fn list_projects(&self) -> Result<Vec<Project>, BackendError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, "desc", created_at, updated_at
+            FROM projects
+            WHERE user_id = $1
+            ORDER BY name
+            "#,
+        )
+        .bind(self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let projects = rows
+            .iter()
+            .map(|row| Project {
+                id: row.get::<uuid::Uuid, _>("id").to_string(),
+                name: row.get("name"),
+                description: row.get("desc"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect();
+
+        Ok(projects)
+    }
+
+    async fn delete_project(&self, name: &str) -> Result<(), BackendError> {
+        let result = sqlx::query("DELETE FROM projects WHERE name = $1 AND user_id = $2")
+            .bind(name)
+            .bind(self.user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(BackendError::NotFound(format!(
+                "Project '{}' not found",
+                name
+            )));
+        }
+
+        Ok(())
     }
 
     async fn list_environments(&self) -> Result<Vec<Environment>, BackendError> {
@@ -1024,26 +1060,105 @@ impl Backend for DbBackend {
 
     // Database methods
     async fn list_databases(&self) -> Result<Vec<Database>, BackendError> {
-        Err(BackendError::Api(
-            "Databases require API access. Use an API alias.".to_string(),
-        ))
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, "desc", provider, max_rows, timeout_seconds, created_at, updated_at
+            FROM database_configs
+            WHERE user_id = $1
+            ORDER BY name
+            "#,
+        )
+        .bind(self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let databases = rows
+            .iter()
+            .map(|row| Database {
+                id: row.get::<uuid::Uuid, _>("id").to_string(),
+                name: row.get("name"),
+                description: row.get("desc"),
+                provider: row.get("provider"),
+                max_rows: row.get("max_rows"),
+                timeout_seconds: row.get("timeout_seconds"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect();
+
+        Ok(databases)
     }
 
-    async fn get_database(&self, _name: &str) -> Result<Database, BackendError> {
-        Err(BackendError::Api(
-            "Databases require API access. Use an API alias.".to_string(),
-        ))
+    async fn get_database(&self, name: &str) -> Result<Database, BackendError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, "desc", provider, max_rows, timeout_seconds, created_at, updated_at
+            FROM database_configs
+            WHERE name = $1 AND user_id = $2
+            "#,
+        )
+        .bind(name)
+        .bind(self.user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| BackendError::NotFound(format!("Database '{}' not found", name)))?;
+
+        Ok(Database {
+            id: row.get::<uuid::Uuid, _>("id").to_string(),
+            name: row.get("name"),
+            description: row.get("desc"),
+            provider: row.get("provider"),
+            max_rows: row.get("max_rows"),
+            timeout_seconds: row.get("timeout_seconds"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
     }
 
-    async fn create_database(&self, _input: CreateDatabaseInput) -> Result<Database, BackendError> {
-        Err(BackendError::Api(
-            "Databases require API access. Use an API alias.".to_string(),
-        ))
+    async fn create_database(&self, input: CreateDatabaseInput) -> Result<Database, BackendError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO database_configs (user_id, name, "desc", provider, connection_string, max_rows, timeout_seconds)
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 1000), COALESCE($7, 30))
+            RETURNING id, name, "desc", provider, max_rows, timeout_seconds, created_at, updated_at
+            "#,
+        )
+        .bind(self.user_id)
+        .bind(&input.name)
+        .bind(&input.desc)
+        .bind(&input.provider)
+        .bind(&input.connection_string)
+        .bind(input.max_rows)
+        .bind(input.timeout_seconds)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Database {
+            id: row.get::<uuid::Uuid, _>("id").to_string(),
+            name: row.get("name"),
+            description: row.get("desc"),
+            provider: row.get("provider"),
+            max_rows: row.get("max_rows"),
+            timeout_seconds: row.get("timeout_seconds"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
     }
 
-    async fn delete_database(&self, _name: &str) -> Result<(), BackendError> {
-        Err(BackendError::Api(
-            "Databases require API access. Use an API alias.".to_string(),
-        ))
+    async fn delete_database(&self, name: &str) -> Result<(), BackendError> {
+        let result = sqlx::query("DELETE FROM database_configs WHERE name = $1 AND user_id = $2")
+            .bind(name)
+            .bind(self.user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(BackendError::NotFound(format!(
+                "Database '{}' not found",
+                name
+            )));
+        }
+
+        Ok(())
     }
 }
