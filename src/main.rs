@@ -237,7 +237,8 @@ enum Commands {
     #[command(after_help = "Examples:\n  \
         ow test-latency              Test request latency (reuses connection)\n  \
         ow test-latency --connect    Test connection latency (new connection each time)\n  \
-        ow local test-latency -n 20  Test with 20 iterations")]
+        ow local test-latency -n 20  Test with 20 iterations\n  \
+        ow test-latency -p 5         Test with 5 parallel requests")]
     TestLatency {
         /// Test connection latency instead of request latency (new connection each time)
         #[arg(short, long)]
@@ -246,6 +247,10 @@ enum Commands {
         /// Number of iterations (default: 10)
         #[arg(short = 'n', long, default_value = "10")]
         count: usize,
+
+        /// Number of parallel requests (default: 1)
+        #[arg(short, long, default_value = "1")]
+        parallel: usize,
 
         /// Timeout in seconds (default: 5)
         #[arg(short, long, default_value = "5")]
@@ -668,8 +673,9 @@ async fn main() {
         Commands::TestLatency {
             connect,
             count,
+            parallel,
             timeout,
-        } => commands::latency::run(alias, connect, count, timeout)
+        } => commands::latency::run(alias, connect, count, parallel, timeout)
             .await
             .map_err(|e| e.to_string()),
         Commands::SetupStorage {

@@ -1,6 +1,8 @@
 use crate::config::{AliasConfig, Config, ConfigError};
 use colored::Colorize;
+use futures::stream::{self, StreamExt};
 use sqlx::postgres::PgPoolOptions;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use url::Url;
@@ -82,6 +84,7 @@ pub async fn run(
     alias: Option<String>,
     connect: bool,
     count: usize,
+    parallel: usize,
     timeout: u64,
 ) -> Result<(), LatencyError> {
     let (alias_name, alias_config) = resolve_alias(&alias)?;
@@ -89,16 +92,16 @@ pub async fn run(
     match alias_config {
         AliasConfig::Db { database_url, .. } => {
             if connect {
-                run_db_connect(&alias_name, &database_url, count, timeout).await
+                run_db_connect(&alias_name, &database_url, count, parallel, timeout).await
             } else {
-                run_db_query(&alias_name, &database_url, count, timeout).await
+                run_db_query(&alias_name, &database_url, count, parallel, timeout).await
             }
         }
         AliasConfig::Api { url, insecure, .. } => {
             if connect {
-                run_http_connect(&alias_name, &url, count, timeout).await
+                run_http_connect(&alias_name, &url, count, parallel, timeout).await
             } else {
-                run_http_reuse(&alias_name, &url, insecure, count, timeout).await
+                run_http_reuse(&alias_name, &url, insecure, count, parallel, timeout).await
             }
         }
     }
@@ -110,6 +113,7 @@ async fn run_db_query(
     alias_name: &str,
     database_url: &str,
     count: usize,
+    parallel: usize,
     timeout: u64,
 ) -> Result<(), LatencyError> {
     let (host, port) = parse_host_port(database_url)?;
@@ -123,7 +127,7 @@ async fn run_db_query(
     );
 
     let pool = PgPoolOptions::new()
-        .max_connections(1)
+        .max_connections(parallel as u32)
         .acquire_timeout(Duration::from_secs(timeout))
         .connect(database_url)
         .await?;
@@ -136,13 +140,25 @@ async fn run_db_query(
 
     let mut latencies = Vec::with_capacity(count);
 
-    for i in 1..=count {
-        let start = Instant::now();
-        let result: Result<i32, _> = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await;
-        let elapsed = start.elapsed();
+    let mut results: Vec<_> = stream::iter(1..=count)
+        .map(|i| {
+            let pool = pool.clone();
+            async move {
+                let start = Instant::now();
+                let result: Result<i32, _> = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await;
+                let elapsed = start.elapsed();
+                (i, result.map(|_| elapsed))
+            }
+        })
+        .buffer_unordered(parallel)
+        .collect()
+        .await;
 
+    results.sort_by_key(|(i, _)| *i);
+
+    for (i, result) in &results {
         match result {
-            Ok(_) => {
+            Ok(elapsed) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
                 latencies.push(ms);
                 println!("  {} {}/{}: {:.2} ms", "✓".green(), i, count, ms);
@@ -175,10 +191,11 @@ async fn run_db_connect(
     alias_name: &str,
     database_url: &str,
     count: usize,
+    parallel: usize,
     timeout: u64,
 ) -> Result<(), LatencyError> {
     let (host, port) = parse_host_port(database_url)?;
-    let addr = format!("{}:{}", host, port);
+    let addr: Arc<str> = format!("{}:{}", host, port).into();
     let timeout_dur = Duration::from_secs(timeout);
 
     println!(
@@ -192,11 +209,24 @@ async fn run_db_connect(
 
     let mut latencies = Vec::with_capacity(count);
 
-    for i in 1..=count {
-        let start = Instant::now();
-        let result = tokio::time::timeout(timeout_dur, TcpStream::connect(&addr)).await;
-        let elapsed = start.elapsed();
+    let mut results: Vec<_> = stream::iter(1..=count)
+        .map(|i| {
+            let addr = addr.clone();
+            async move {
+                let start = Instant::now();
+                let result =
+                    tokio::time::timeout(timeout_dur, TcpStream::connect(addr.as_ref())).await;
+                let elapsed = start.elapsed();
+                (i, result, elapsed)
+            }
+        })
+        .buffer_unordered(parallel)
+        .collect()
+        .await;
 
+    results.sort_by_key(|(i, _, _)| *i);
+
+    for (i, result, elapsed) in &results {
         match result {
             Ok(Ok(_)) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
@@ -215,10 +245,6 @@ async fn run_db_connect(
             Err(_) => {
                 println!("  {} {}/{}: {}", "✗".red(), i, count, "timeout".dimmed());
             }
-        }
-
-        if i < count {
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
@@ -270,6 +296,7 @@ async fn run_http_reuse(
     url: &str,
     insecure: bool,
     count: usize,
+    parallel: usize,
     timeout: u64,
 ) -> Result<(), LatencyError> {
     let (host, _) = parse_host_port(url)?;
@@ -312,31 +339,45 @@ async fn run_http_reuse(
     let mut any_success = false;
 
     for layer in LAYERS {
-        let endpoint = latency_url(url, layer.path);
+        let endpoint: Arc<str> = latency_url(url, layer.path).into();
 
         println!();
         println!("{}:", layer.label.bold());
 
         let mut latencies = Vec::with_capacity(count);
 
-        for i in 1..=count {
-            let start = Instant::now();
-            let result = client.get(&endpoint).send().await;
-            let elapsed = start.elapsed();
+        let mut results: Vec<_> = stream::iter(1..=count)
+            .map(|i| {
+                let client = client.clone();
+                let endpoint = endpoint.clone();
+                async move {
+                    let start = Instant::now();
+                    let result = client.get(endpoint.as_ref()).send().await;
+                    let elapsed = start.elapsed();
+                    (i, result, elapsed)
+                }
+            })
+            .buffer_unordered(parallel)
+            .collect()
+            .await;
 
+        results.sort_by_key(|(i, _, _)| *i);
+
+        let mut not_configured = false;
+
+        for (i, result, elapsed) in results {
             match result {
                 Ok(resp) if resp.status().as_u16() == 418 => {
                     let _ = resp.bytes().await;
 
-                    if i == 1 {
+                    if !not_configured {
+                        not_configured = true;
                         println!(
                             "  {} {} (not configured)",
                             "─".dimmed(),
                             layer.name.dimmed()
                         );
                     }
-
-                    break;
                 }
                 Ok(resp) if resp.status().is_success() => {
                     let _ = resp.bytes().await;
@@ -400,10 +441,11 @@ async fn run_http_connect(
     alias_name: &str,
     url: &str,
     count: usize,
+    parallel: usize,
     timeout: u64,
 ) -> Result<(), LatencyError> {
     let (host, port) = parse_host_port(url)?;
-    let addr = format!("{}:{}", host, port);
+    let addr: Arc<str> = format!("{}:{}", host, port).into();
     let timeout_dur = Duration::from_secs(timeout);
 
     println!(
@@ -417,11 +459,24 @@ async fn run_http_connect(
 
     let mut latencies = Vec::with_capacity(count);
 
-    for i in 1..=count {
-        let start = Instant::now();
-        let result = tokio::time::timeout(timeout_dur, TcpStream::connect(&addr)).await;
-        let elapsed = start.elapsed();
+    let mut results: Vec<_> = stream::iter(1..=count)
+        .map(|i| {
+            let addr = addr.clone();
+            async move {
+                let start = Instant::now();
+                let result =
+                    tokio::time::timeout(timeout_dur, TcpStream::connect(addr.as_ref())).await;
+                let elapsed = start.elapsed();
+                (i, result, elapsed)
+            }
+        })
+        .buffer_unordered(parallel)
+        .collect()
+        .await;
 
+    results.sort_by_key(|(i, _, _)| *i);
+
+    for (i, result, elapsed) in &results {
         match result {
             Ok(Ok(_)) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
@@ -440,10 +495,6 @@ async fn run_http_connect(
             Err(_) => {
                 println!("  {} {}/{}: {}", "✗".red(), i, count, "timeout".dimmed());
             }
-        }
-
-        if i < count {
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
