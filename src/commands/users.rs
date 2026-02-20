@@ -1,6 +1,11 @@
 use crate::config::{AliasConfig, Config, ConfigError};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use clap::Subcommand;
 use colored::Colorize;
+use pbkdf2::hmac::Hmac;
+use rand::RngCore;
+use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
@@ -23,6 +28,12 @@ pub enum UsersError {
 
     #[error("User '{0}' already exists")]
     UserExists(String),
+
+    #[error("Passwords do not match")]
+    PasswordMismatch,
+
+    #[error("Password error: {0}")]
+    Password(String),
 }
 
 #[derive(Subcommand)]
@@ -41,7 +52,8 @@ pub enum UsersCommand {
     /// Create a new user (bootstrap mode - no user required)
     #[command(after_help = "Examples:\n  \
         ow local users create max\n  \
-        ow local users create max --system")]
+        ow local users create max --system\n  \
+        ow local users create max --password")]
     Create {
         /// Username for the new user
         username: String,
@@ -49,6 +61,10 @@ pub enum UsersCommand {
         /// Claim the system user (rename __system__ to this username)
         #[arg(long)]
         system: bool,
+
+        /// Set a password for the user (prompts interactively)
+        #[arg(long)]
+        password: bool,
     },
 
     /// Delete a user
@@ -70,7 +86,11 @@ impl UsersCommand {
         match self {
             Self::List => cmd_list(&pool).await,
             Self::Get { username } => cmd_get(&pool, &username).await,
-            Self::Create { username, system } => cmd_create(&pool, username, system).await,
+            Self::Create {
+                username,
+                system,
+                password,
+            } => cmd_create(&pool, username, system, password).await,
             Self::Delete { username } => cmd_delete(&pool, &username).await,
         }
     }
@@ -171,7 +191,53 @@ async fn cmd_get(pool: &PgPool, username: &str) -> Result<(), UsersError> {
     Ok(())
 }
 
-async fn cmd_create(pool: &PgPool, username: String, system: bool) -> Result<(), UsersError> {
+fn hash_password(password: &str) -> String {
+    const ITERATIONS: u32 = 100_000;
+    const SALT_LEN: usize = 16;
+    const KEY_LEN: usize = 32;
+
+    let mut salt = [0u8; SALT_LEN];
+    rand::rng().fill_bytes(&mut salt);
+
+    let mut hash = [0u8; KEY_LEN];
+    pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt, ITERATIONS, &mut hash)
+        .expect("HMAC can be initialized with any key length");
+
+    format!(
+        "{}${}${}",
+        ITERATIONS,
+        BASE64.encode(salt),
+        BASE64.encode(hash)
+    )
+}
+
+fn prompt_password() -> Result<String, UsersError> {
+    let password = rpassword::prompt_password("Password: ")
+        .map_err(|e| UsersError::Password(e.to_string()))?;
+
+    let confirm =
+        rpassword::prompt_password("Confirm: ").map_err(|e| UsersError::Password(e.to_string()))?;
+
+    if password != confirm {
+        return Err(UsersError::PasswordMismatch);
+    }
+
+    Ok(password)
+}
+
+async fn cmd_create(
+    pool: &PgPool,
+    username: String,
+    system: bool,
+    password: bool,
+) -> Result<(), UsersError> {
+    let password_hash = if password {
+        let pw = prompt_password()?;
+        Some(hash_password(&pw))
+    } else {
+        None
+    };
+
     if system {
         // Rename the system user to claim it
         let result = sqlx::query(
@@ -222,6 +288,16 @@ async fn cmd_create(pool: &PgPool, username: String, system: bool) -> Result<(),
             username.bold(),
             id.to_string().dimmed()
         );
+    }
+
+    if let Some(hash) = password_hash {
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE username = $2")
+            .bind(&hash)
+            .bind(&username)
+            .execute(pool)
+            .await?;
+
+        println!("{} Password set.", "Password".green().bold());
     }
 
     println!("\n{} Set this user as default with:", "Next:".cyan().bold());
