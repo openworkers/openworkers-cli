@@ -2,6 +2,7 @@ use crate::config::{AliasConfig, Config, ConfigError};
 use colored::Colorize;
 use futures::stream::{self, StreamExt};
 use sqlx::postgres::PgPoolOptions;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
@@ -80,6 +81,86 @@ fn print_stats(latencies: &[f64], count: usize) {
     );
 }
 
+// --- Live progress display ---
+
+struct LiveProgress {
+    count: usize,
+    completed: usize,
+    latencies: Vec<f64>,
+}
+
+impl LiveProgress {
+    fn new(count: usize) -> Self {
+        let p = Self {
+            count,
+            completed: 0,
+            latencies: Vec::with_capacity(count),
+        };
+        p.render_status();
+        p
+    }
+
+    fn render_status(&self) {
+        if self.latencies.is_empty() {
+            print!(
+                "\r\x1b[2K  {}",
+                format!("{}/{}", self.completed, self.count).dimmed()
+            );
+        } else {
+            let min = self.latencies.iter().cloned().fold(f64::INFINITY, f64::min);
+            let avg = self.latencies.iter().sum::<f64>() / self.latencies.len() as f64;
+            let max = self
+                .latencies
+                .iter()
+                .cloned()
+                .fold(f64::NEG_INFINITY, f64::max);
+            print!(
+                "\r\x1b[2K  {}",
+                format!(
+                    "{}/{} | min {:.2} / avg {:.2} / max {:.2} ms",
+                    self.completed, self.count, min, avg, max
+                )
+                .dimmed()
+            );
+        }
+
+        io::stdout().flush().unwrap();
+    }
+
+    fn clear_status(&self) {
+        print!("\r\x1b[2K");
+        io::stdout().flush().unwrap();
+    }
+
+    fn success(&mut self, i: usize, ms: f64) {
+        self.completed += 1;
+        self.latencies.push(ms);
+        print!("\r\x1b[2K");
+        println!("  {} {}/{}: {:.2} ms", "✓".green(), i, self.count, ms);
+        self.render_status();
+    }
+
+    fn failure(&mut self, i: usize, msg: &str) {
+        self.completed += 1;
+        print!("\r\x1b[2K");
+        println!("  {} {}/{}: {}", "✗".red(), i, self.count, msg.dimmed());
+        self.render_status();
+    }
+
+    fn skip(&mut self) {
+        self.completed += 1;
+        self.render_status();
+    }
+
+    fn finish(self) -> Vec<f64> {
+        print!("\r\x1b[2K");
+        io::stdout().flush().unwrap();
+        self.latencies
+    }
+}
+
+// --- Entry point ---
+
 pub async fn run(
     alias: Option<String>,
     connect: bool,
@@ -138,9 +219,9 @@ async fn run_db_query(
     );
     println!();
 
-    let mut latencies = Vec::with_capacity(count);
+    let mut progress = LiveProgress::new(count);
 
-    let mut results: Vec<_> = stream::iter(1..=count)
+    let mut stream = stream::iter(1..=count)
         .map(|i| {
             let pool = pool.clone();
             async move {
@@ -150,30 +231,21 @@ async fn run_db_query(
                 (i, result.map(|_| elapsed))
             }
         })
-        .buffer_unordered(parallel)
-        .collect()
-        .await;
+        .buffer_unordered(parallel);
 
-    results.sort_by_key(|(i, _)| *i);
-
-    for (i, result) in &results {
+    while let Some((i, result)) = stream.next().await {
         match result {
             Ok(elapsed) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
-                latencies.push(ms);
-                println!("  {} {}/{}: {:.2} ms", "✓".green(), i, count, ms);
+                progress.success(i, ms);
             }
             Err(e) => {
-                println!(
-                    "  {} {}/{}: {}",
-                    "✗".red(),
-                    i,
-                    count,
-                    e.to_string().dimmed()
-                );
+                progress.failure(i, &e.to_string());
             }
         }
     }
+
+    let latencies = progress.finish();
 
     println!();
     print_stats(&latencies, count);
@@ -207,9 +279,9 @@ async fn run_db_connect(
     );
     println!();
 
-    let mut latencies = Vec::with_capacity(count);
+    let mut progress = LiveProgress::new(count);
 
-    let mut results: Vec<_> = stream::iter(1..=count)
+    let mut stream = stream::iter(1..=count)
         .map(|i| {
             let addr = addr.clone();
             async move {
@@ -220,33 +292,24 @@ async fn run_db_connect(
                 (i, result, elapsed)
             }
         })
-        .buffer_unordered(parallel)
-        .collect()
-        .await;
+        .buffer_unordered(parallel);
 
-    results.sort_by_key(|(i, _, _)| *i);
-
-    for (i, result, elapsed) in &results {
+    while let Some((i, result, elapsed)) = stream.next().await {
         match result {
             Ok(Ok(_)) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
-                latencies.push(ms);
-                println!("  {} {}/{}: {:.2} ms", "✓".green(), i, count, ms);
+                progress.success(i, ms);
             }
             Ok(Err(e)) => {
-                println!(
-                    "  {} {}/{}: {}",
-                    "✗".red(),
-                    i,
-                    count,
-                    e.to_string().dimmed()
-                );
+                progress.failure(i, &e.to_string());
             }
             Err(_) => {
-                println!("  {} {}/{}: {}", "✗".red(), i, count, "timeout".dimmed());
+                progress.failure(i, "timeout");
             }
         }
     }
+
+    let latencies = progress.finish();
 
     println!();
     print_stats(&latencies, count);
@@ -344,9 +407,10 @@ async fn run_http_reuse(
         println!();
         println!("{}:", layer.label.bold());
 
-        let mut latencies = Vec::with_capacity(count);
+        let mut progress = LiveProgress::new(count);
+        let mut not_configured = false;
 
-        let mut results: Vec<_> = stream::iter(1..=count)
+        let mut stream = stream::iter(1..=count)
             .map(|i| {
                 let client = client.clone();
                 let endpoint = endpoint.clone();
@@ -357,56 +421,42 @@ async fn run_http_reuse(
                     (i, result, elapsed)
                 }
             })
-            .buffer_unordered(parallel)
-            .collect()
-            .await;
+            .buffer_unordered(parallel);
 
-        results.sort_by_key(|(i, _, _)| *i);
-
-        let mut not_configured = false;
-
-        for (i, result, elapsed) in results {
+        while let Some((i, result, elapsed)) = stream.next().await {
             match result {
                 Ok(resp) if resp.status().as_u16() == 418 => {
                     let _ = resp.bytes().await;
 
                     if !not_configured {
                         not_configured = true;
+                        progress.clear_status();
                         println!(
                             "  {} {} (not configured)",
                             "─".dimmed(),
                             layer.name.dimmed()
                         );
                     }
+
+                    progress.skip();
                 }
                 Ok(resp) if resp.status().is_success() => {
                     let _ = resp.bytes().await;
                     let ms = elapsed.as_secs_f64() * 1000.0;
-                    latencies.push(ms);
-                    println!("  {} {}/{}: {:.2} ms", "✓".green(), i, count, ms);
+                    progress.success(i, ms);
                 }
                 Ok(resp) => {
                     let status = resp.status();
                     let _ = resp.bytes().await;
-                    println!(
-                        "  {} {}/{}: {}",
-                        "✗".red(),
-                        i,
-                        count,
-                        format!("HTTP {}", status).dimmed()
-                    );
+                    progress.failure(i, &format!("HTTP {}", status));
                 }
                 Err(e) => {
-                    println!(
-                        "  {} {}/{}: {}",
-                        "✗".red(),
-                        i,
-                        count,
-                        e.to_string().dimmed()
-                    );
+                    progress.failure(i, &e.to_string());
                 }
             }
         }
+
+        let latencies = progress.finish();
 
         if !latencies.is_empty() {
             any_success = true;
@@ -457,9 +507,9 @@ async fn run_http_connect(
     );
     println!();
 
-    let mut latencies = Vec::with_capacity(count);
+    let mut progress = LiveProgress::new(count);
 
-    let mut results: Vec<_> = stream::iter(1..=count)
+    let mut stream = stream::iter(1..=count)
         .map(|i| {
             let addr = addr.clone();
             async move {
@@ -470,33 +520,24 @@ async fn run_http_connect(
                 (i, result, elapsed)
             }
         })
-        .buffer_unordered(parallel)
-        .collect()
-        .await;
+        .buffer_unordered(parallel);
 
-    results.sort_by_key(|(i, _, _)| *i);
-
-    for (i, result, elapsed) in &results {
+    while let Some((i, result, elapsed)) = stream.next().await {
         match result {
             Ok(Ok(_)) => {
                 let ms = elapsed.as_secs_f64() * 1000.0;
-                latencies.push(ms);
-                println!("  {} {}/{}: {:.2} ms", "✓".green(), i, count, ms);
+                progress.success(i, ms);
             }
             Ok(Err(e)) => {
-                println!(
-                    "  {} {}/{}: {}",
-                    "✗".red(),
-                    i,
-                    count,
-                    e.to_string().dimmed()
-                );
+                progress.failure(i, &e.to_string());
             }
             Err(_) => {
-                println!("  {} {}/{}: {}", "✗".red(), i, count, "timeout".dimmed());
+                progress.failure(i, "timeout");
             }
         }
     }
+
+    let latencies = progress.finish();
 
     println!();
     print_stats(&latencies, count);
