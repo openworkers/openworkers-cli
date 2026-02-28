@@ -181,11 +181,8 @@ impl Backend for ApiBackend {
         environment_id: &str,
     ) -> Result<(), BackendError> {
         let response = self
-            .request(
-                reqwest::Method::POST,
-                &format!("/workers/{}/link", worker_id),
-            )
-            .json(&serde_json::json!({ "environmentId": environment_id }))
+            .request(reqwest::Method::PATCH, &format!("/workers/{}", worker_id))
+            .json(&serde_json::json!({ "environment": environment_id }))
             .send()
             .await?;
 
