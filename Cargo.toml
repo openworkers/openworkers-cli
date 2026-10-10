@@ -53,12 +53,12 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "chrono", "uu
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "multipart", "stream"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 base64 = "0.23"
 zip = { version = "9", default-features = false, features = ["deflate"] }
-hmac = "0.12"
-pbkdf2 = { version = "0.12", features = ["hmac"] }
+hmac = "0.13"
+pbkdf2 = { version = "0.13", features = ["hmac"] }
 rand = "0.9"
 mime_guess = "2"
 futures = "0.3"
