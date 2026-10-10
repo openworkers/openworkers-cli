@@ -561,22 +561,16 @@ impl McpHandler {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpHandler {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::default(),
-            server_info: Implementation {
-                name: "openworkers-cli".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                description: Some("OpenWorkers CLI MCP Server - Manage workers, environments, KV namespaces, storage, and databases".to_string()),
-                website_url: None,
-                title: Some("OpenWorkers CLI".to_string()),
-                icons: None,
-            },
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            instructions: Some("This server provides tools to manage OpenWorkers platform resources including workers (serverless functions), environments (configuration sets), and KV namespaces (key-value storage). The server uses the configured alias for authentication - if no alias is specified, it uses the default from the CLI config.".to_string()),
-        }
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(
+                Implementation::new("openworkers-cli", env!("CARGO_PKG_VERSION"))
+                    .with_title("OpenWorkers CLI")
+                    .with_description("OpenWorkers CLI MCP Server - Manage workers, environments, KV namespaces, storage, and databases"),
+            )
+            .with_instructions("This server provides tools to manage OpenWorkers platform resources including workers (serverless functions), environments (configuration sets), and KV namespaces (key-value storage). The server uses the configured alias for authentication - if no alias is specified, it uses the default from the CLI config.")
     }
 }
 
