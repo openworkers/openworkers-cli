@@ -191,16 +191,21 @@ async fn cmd_get(pool: &PgPool, username: &str) -> Result<(), UsersError> {
     Ok(())
 }
 
-fn hash_password(password: &str) -> String {
-    const ITERATIONS: u32 = 100_000;
-    const SALT_LEN: usize = 16;
-    const KEY_LEN: usize = 32;
+const SALT_LEN: usize = 16;
 
+fn hash_password(password: &str) -> String {
     let mut salt = [0u8; SALT_LEN];
     rand::rng().fill_bytes(&mut salt);
 
+    hash_password_with_salt(password, &salt)
+}
+
+fn hash_password_with_salt(password: &str, salt: &[u8; SALT_LEN]) -> String {
+    const ITERATIONS: u32 = 100_000;
+    const KEY_LEN: usize = 32;
+
     let mut hash = [0u8; KEY_LEN];
-    pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt, ITERATIONS, &mut hash)
+    pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), salt, ITERATIONS, &mut hash)
         .expect("HMAC can be initialized with any key length");
 
     format!(
@@ -326,4 +331,19 @@ async fn cmd_delete(pool: &PgPool, username: &str) -> Result<(), UsersError> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_password_matches_known_vector() {
+        let salt: [u8; SALT_LEN] = *b"openworkers-salt";
+
+        assert_eq!(
+            hash_password_with_salt("hunter2", &salt),
+            "100000$b3BlbndvcmtlcnMtc2FsdA==$De/wto1AdoRaKwqrQn39eqF73I5tDJC1IU52qY+9Auk="
+        );
+    }
 }
