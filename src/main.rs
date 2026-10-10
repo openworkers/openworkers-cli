@@ -365,13 +365,13 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         return (None, args);
     }
 
-    if let Ok(config) = Config::load() {
-        if config.get_alias(potential_alias).is_some() {
-            let mut filtered: Vec<String> = Vec::with_capacity(args.len() - 1);
-            filtered.push(args[0].clone());
-            filtered.extend(args[2..].iter().cloned());
-            return (Some(potential_alias.clone()), filtered);
-        }
+    if let Ok(config) = Config::load()
+        && config.get_alias(potential_alias).is_some()
+    {
+        let mut filtered: Vec<String> = Vec::with_capacity(args.len() - 1);
+        filtered.push(args[0].clone());
+        filtered.extend(args[2..].iter().cloned());
+        return (Some(potential_alias.clone()), filtered);
     }
 
     (None, args)

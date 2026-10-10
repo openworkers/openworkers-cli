@@ -4,6 +4,7 @@ use crate::backend::{
 use crate::s3::{self, PresignedClient, S3Client, S3Config, get_mime_type};
 use clap::Subcommand;
 use colored::Colorize;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -413,7 +414,7 @@ async fn cmd_upload<B: Backend>(
 type Asset = (String, Vec<u8>, String, String);
 
 /// Collect assets from the assets/ subdirectory of a folder
-fn collect_assets(folder: &PathBuf) -> Result<Vec<Asset>, BackendError> {
+fn collect_assets(folder: &Path) -> Result<Vec<Asset>, BackendError> {
     let assets_dir = folder.join("assets");
 
     if !assets_dir.exists() {

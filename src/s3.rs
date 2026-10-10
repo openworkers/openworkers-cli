@@ -63,17 +63,15 @@ pub async fn upload_assets(
             if let Ok(Some((remote_checksum, etag))) = storage.head(&path).await {
                 has_etag = etag;
 
-                if let Some(ref remote_hash) = remote_checksum {
-                    if remote_hash == &hash_b64 {
-                        println!(
-                            "  {} {} {}",
-                            "⎿".dimmed(),
-                            path,
-                            "(skipped, checksum match)".dimmed()
-                        );
-                        skipped.fetch_add(1, Ordering::Relaxed);
-                        should_upload = false;
-                    }
+                if remote_checksum.as_ref() == Some(&hash_b64) {
+                    println!(
+                        "  {} {} {}",
+                        "\u{23bf}".dimmed(),
+                        path,
+                        "(skipped, checksum match)".dimmed()
+                    );
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    should_upload = false;
                 }
             }
 

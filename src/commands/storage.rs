@@ -2,6 +2,8 @@ use crate::backend::{Backend, BackendError, CreateStorageInput};
 use clap::Subcommand;
 use colored::Colorize;
 
+// Parsed once per process, so the size of the Create variant does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum StorageCommand {
     /// List all storage configurations

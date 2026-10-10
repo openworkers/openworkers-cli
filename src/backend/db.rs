@@ -432,15 +432,15 @@ impl Backend for DbBackend {
                     BackendError::Api(format!("Failed to read _routes.json: {}", e))
                 })?;
                 routes_json = Some(content);
-            } else if filename.contains("functions/") && filename.ends_with(".js") {
-                if let Some(pos) = filename.find("functions/") {
-                    let func_path = &filename[pos..];
-                    let mut content = String::new();
-                    file.read_to_string(&mut content).map_err(|e| {
-                        BackendError::Api(format!("Failed to read function script: {}", e))
-                    })?;
-                    function_scripts.insert(func_path.to_string(), content);
-                }
+            } else if filename.ends_with(".js")
+                && let Some(pos) = filename.find("functions/")
+            {
+                let func_path = &filename[pos..];
+                let mut content = String::new();
+                file.read_to_string(&mut content).map_err(|e| {
+                    BackendError::Api(format!("Failed to read function script: {}", e))
+                })?;
+                function_scripts.insert(func_path.to_string(), content);
             }
         }
 
