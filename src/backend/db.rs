@@ -396,7 +396,10 @@ impl Backend for DbBackend {
                 continue;
             }
 
-            let filename = file.name().replace('\\', "/");
+            let filename = file
+                .name()
+                .map_err(|e| BackendError::Api(format!("Invalid zip entry name: {}", e)))?
+                .replace('\\', "/");
 
             // Normalize path (remove leading directory if present)
             let normalized = filename
