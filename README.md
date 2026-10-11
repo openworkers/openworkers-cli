@@ -40,7 +40,7 @@ cargo install --git https://github.com/openworkers/openworkers-cli
 
 ```bash
 # Configure your API backend
-ow alias set prod --api https://dash.openworkers.com
+ow alias set prod --api https://dash.openworkers.com/api/v1
 
 # Login (prompts for API token)
 ow login
@@ -54,17 +54,21 @@ ow workers deploy my-api worker.ts
 
 ## Commands
 
-| Command     | Short | Description                    |
-| ----------- | ----- | ------------------------------ |
-| `workers`   | `w`   | Create, deploy, manage workers |
-| `env`       | `e`   | Environment variables/secrets  |
-| `storage`   | `s`   | S3/R2 storage configurations   |
-| `kv`        | `k`   | Key-value namespaces           |
-| `databases` | `d`   | SQL database bindings          |
-| `users`     | `u`   | User management (DB only)      |
-| `alias`     |       | Backend connection aliases     |
-| `login`     |       | Authenticate with API          |
-| `migrate`   |       | Database schema migrations     |
+| Command         | Short | Description                                  |
+| --------------- | ----- | -------------------------------------------- |
+| `workers`       | `w`   | Create, deploy, manage workers               |
+| `projects`      | `p`   | Multi-worker deployments                     |
+| `env`           | `e`   | Environment variables/secrets                |
+| `storage`       | `s`   | S3/R2 storage configurations                 |
+| `kv`            | `k`   | Key-value namespaces                         |
+| `databases`     | `d`   | SQL database bindings                        |
+| `users`         | `u`   | User management (DB only)                    |
+| `alias`         |       | Backend connection aliases                   |
+| `login`         |       | Authenticate with API                        |
+| `migrate`       |       | Database schema migrations (DB only)         |
+| `setup-storage` |       | Platform storage for asset uploads (DB only) |
+| `test-latency`  |       | Measure the latency to the backend           |
+| `mcp`           |       | MCP server for AI assistants                 |
 
 Common operations: `list` (`ls`), `get`, `create`, `delete` (`rm`)
 
@@ -170,10 +174,10 @@ Aliases let you manage multiple backends (production, staging, local) from the s
 
 ```bash
 # API backend (hosted platform)
-ow alias set prod --api https://dash.openworkers.com
+ow alias set prod --api https://dash.openworkers.com/api/v1
 
-# API backend (self-hosted, skip TLS verification)
-ow alias set dev --api http://localhost:8080 --insecure
+# API backend (self-hosted, self-signed certificate: skip TLS verification)
+ow alias set dev --api https://dash.dev.localhost:8443/api/v1 --insecure
 
 # DB backend (direct PostgreSQL access for migrations)
 ow alias set local --db postgres://user:pass@localhost/ow --user admin@example.com
@@ -182,6 +186,9 @@ ow alias list
 ow alias set-default prod
 ow alias rm old-alias
 ```
+
+The `--api` URL ends in `/api/v1`. The CLI adds the path of each call to it,
+for example `/workers`.
 
 Prefix any command with an alias name:
 
@@ -198,13 +205,14 @@ Config stored in `~/.openworkers/config.json`.
 OpenWorkers CLI includes an MCP server that exposes CLI commands as tools for AI assistants like Claude.
 
 **Available tools:**
+
 - Workers: list, get, create, deploy, delete, link
 - Environments: list, set variables/secrets, bind resources
 - KV: list, create, delete
 - Storage: list, create, delete
 - Databases: list, create, delete
 
-### Setup for Claude CLI
+### Setup for Claude Code
 
 Create `.mcp.json` in your project:
 
@@ -237,6 +245,7 @@ Run `claude` in your project directory and enable the OpenWorkers server when pr
 ### Setup for Claude Desktop
 
 Edit Claude Desktop config file:
+
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
@@ -254,7 +263,7 @@ Add:
 }
 ```
 
-Restart Claude Desktop. The 🔨 icon indicates MCP tools are available.
+Restart Claude Desktop.
 
 ### Usage
 
@@ -279,6 +288,15 @@ ow local migrate status    # Show pending migrations
 ow local migrate run       # Apply pending migrations
 ow local migrate baseline  # Mark all as applied (for existing databases)
 ```
+
+Keep the alias prefix. Without it, the command uses the default alias.
+
+On an empty database, migration 28 stops `migrate run` with
+`unsafe use of new value "planetscale" of enum type`. The CLI runs each file in
+a transaction, and PostgreSQL does not use a new enum value in the transaction
+that adds it. Apply that file with `psql` and record it, as
+[GETTING_STARTED.md](https://github.com/openworkers/openworkers-infra/blob/main/GETTING_STARTED.md#3-cli-alias-and-migrations)
+shows. Then run `migrate run` again.
 
 ## Config File
 

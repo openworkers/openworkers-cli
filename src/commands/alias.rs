@@ -6,14 +6,14 @@ use colored::Colorize;
 pub enum AliasCommand {
     /// Configure a new alias for API or direct database access
     #[command(after_help = "Examples:\n  \
-        ow alias set prod --api https://dash.openworkers.com\n  \
+        ow alias set prod --api https://dash.openworkers.com/api/v1\n  \
         ow alias set local --db postgres://localhost/ow --user admin@example.com\n  \
-        ow alias set dev --api https://localhost:8080 --insecure")]
+        ow alias set dev --api https://dash.dev.localhost:8443/api/v1 --insecure")]
     Set {
         /// Alias name (used as prefix: ow <alias> workers list)
         name: String,
 
-        /// API URL for HTTP backend (e.g., https://dash.openworkers.com)
+        /// API URL for HTTP backend, ending in /api/v1 (e.g., https://dash.openworkers.com/api/v1)
         #[arg(long, conflicts_with = "db")]
         api: Option<String>,
 

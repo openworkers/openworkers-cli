@@ -74,10 +74,10 @@ struct Cli {
 enum Commands {
     /// Manage connection aliases (API or database backends)
     #[command(after_help = "Examples:\n  \
-        ow alias list                                  List all aliases\n  \
-        ow alias set prod --api https://api.example.com   Add API alias\n  \
-        ow alias set local --db postgres://... --user max Add DB alias\n  \
-        ow alias set-default prod                      Set default alias")]
+        ow alias list                                             List all aliases\n  \
+        ow alias set prod --api https://api.example.com/api/v1    Add API alias\n  \
+        ow alias set local --db postgres://... --user max         Add DB alias\n  \
+        ow alias set-default prod                                 Set default alias")]
     Alias {
         #[command(subcommand)]
         command: AliasCommand,
