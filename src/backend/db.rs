@@ -775,6 +775,15 @@ impl Backend for DbBackend {
                         .bind(value_id)
                         .execute(&self.pool)
                         .await?;
+                    } else {
+                        // No value removes it, as with the API backend
+                        sqlx::query(
+                            "DELETE FROM environment_values WHERE id = $1 AND environment_id = $2",
+                        )
+                        .bind(value_id)
+                        .bind(env_id)
+                        .execute(&self.pool)
+                        .await?;
                     }
                 } else if let Some(val) = &value.value {
                     // Create new value
