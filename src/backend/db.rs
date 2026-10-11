@@ -1,9 +1,9 @@
 use super::{
     AssetManifestEntry, Backend, BackendError, CreateDatabaseInput, CreateEnvironmentInput,
-    CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DeployInput, DeployedInfo,
-    Deployment, DirectUploadConfig, Environment, EnvironmentValue, KvNamespace, Project,
-    StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult, UploadWorkerInfo,
-    Worker,
+    CreateKvInput, CreateStorageInput, CreateWorkerInput, Database, DatabaseProvider, DeployInput,
+    DeployedInfo, Deployment, DirectUploadConfig, Environment, EnvironmentValue, KvNamespace,
+    Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult,
+    UploadWorkerInfo, Worker,
 };
 use crate::config::PlatformStorageConfig;
 use serde::Deserialize;
@@ -1128,10 +1128,27 @@ impl Backend for DbBackend {
     }
 
     async fn create_database(&self, input: CreateDatabaseInput) -> Result<Database, BackendError> {
+        let mut tx = self.pool.begin().await?;
+
+        // A platform database is a schema of its own on the shared pool, as the API makes it
+        let schema_name = match input.provider {
+            DatabaseProvider::Platform => {
+                let name = format!("tenant_{}", uuid::Uuid::new_v4()).replace('-', "_");
+
+                sqlx::query("SELECT create_tenant_schema($1)")
+                    .bind(&name)
+                    .execute(&mut *tx)
+                    .await?;
+
+                Some(name)
+            }
+            DatabaseProvider::Postgres => None,
+        };
+
         let row = sqlx::query(
             r#"
-            INSERT INTO database_configs (user_id, name, "desc", provider, connection_string, max_rows, timeout_seconds)
-            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 1000), COALESCE($7, 30))
+            INSERT INTO database_configs (user_id, name, "desc", provider, connection_string, schema_name, max_rows, timeout_seconds)
+            VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 1000), COALESCE($8, 30))
             RETURNING id, name, "desc", provider, max_rows, timeout_seconds, created_at, updated_at
             "#,
         )
@@ -1140,10 +1157,13 @@ impl Backend for DbBackend {
         .bind(&input.desc)
         .bind(&input.provider)
         .bind(&input.connection_string)
+        .bind(&schema_name)
         .bind(input.max_rows)
         .bind(input.timeout_seconds)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         Ok(Database {
             id: row.get::<uuid::Uuid, _>("id").to_string(),
@@ -1158,19 +1178,103 @@ impl Backend for DbBackend {
     }
 
     async fn delete_database(&self, name: &str) -> Result<(), BackendError> {
-        let result = sqlx::query("DELETE FROM database_configs WHERE name = $1 AND user_id = $2")
-            .bind(name)
-            .bind(self.user_id)
-            .execute(&self.pool)
-            .await?;
+        let mut tx = self.pool.begin().await?;
 
-        if result.rows_affected() == 0 {
+        let schema_name: Option<Option<String>> = sqlx::query_scalar(
+            "DELETE FROM database_configs WHERE name = $1 AND user_id = $2 RETURNING schema_name",
+        )
+        .bind(name)
+        .bind(self.user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(schema_name) = schema_name else {
             return Err(BackendError::NotFound(format!(
                 "Database '{}' not found",
                 name
             )));
+        };
+
+        if let Some(schema_name) = schema_name {
+            sqlx::query("SELECT drop_tenant_schema($1)")
+                .bind(&schema_name)
+                .execute(&mut *tx)
+                .await?;
         }
 
+        tx.commit().await?;
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::DatabaseProvider;
+
+    /// A backend on a migrated database, from OW_TEST_DATABASE_URL and OW_TEST_USER.
+    async fn backend() -> Option<DbBackend> {
+        let url = std::env::var("OW_TEST_DATABASE_URL").ok()?;
+        let user = std::env::var("OW_TEST_USER").ok()?;
+        let pool = PgPool::connect(&url)
+            .await
+            .expect("the test database answers");
+
+        Some(
+            DbBackend::new(pool, Some(user), None)
+                .await
+                .expect("the test user exists"),
+        )
+    }
+
+    async fn schema_exists(backend: &DbBackend, name: &str) -> bool {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)")
+            .bind(name)
+            .fetch_one(&backend.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn schema_of(backend: &DbBackend, name: &str) -> Option<String> {
+        sqlx::query_scalar("SELECT schema_name FROM database_configs WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&backend.pool)
+            .await
+            .unwrap()
+            .flatten()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs OW_TEST_DATABASE_URL and OW_TEST_USER"]
+    async fn a_platform_database_gets_its_own_schema_until_deleted() {
+        let Some(backend) = backend().await else {
+            return;
+        };
+
+        let name = format!("cli-test-{}", uuid::Uuid::new_v4());
+
+        backend
+            .create_database(CreateDatabaseInput {
+                name: name.clone(),
+                desc: None,
+                provider: DatabaseProvider::Platform,
+                connection_string: None,
+                max_rows: None,
+                timeout_seconds: None,
+            })
+            .await
+            .expect("a platform database is created");
+
+        let schema = schema_of(&backend, &name)
+            .await
+            .expect("the config names a schema");
+        assert!(schema_exists(&backend, &schema).await, "{schema} exists");
+
+        backend.delete_database(&name).await.unwrap();
+        assert!(
+            !schema_exists(&backend, &schema).await,
+            "{schema} is dropped"
+        );
     }
 }
