@@ -64,6 +64,17 @@ pub enum D1Command {
         json: bool,
     },
 
+    /// Replace the runner's copy of a D1 database with its last snapshot
+    #[command(
+        after_help = "The runner moves its files aside (*.replaced-<time>) and the next\n\
+        call restores the last snapshot. Commits after that snapshot are lost.\n\n\
+        Example:\n  ow d1 restore guestbook"
+    )]
+    Restore {
+        /// D1 database name
+        name: String,
+    },
+
     /// Apply or list the SQL migrations of a D1 database
     Migrations {
         #[command(subcommand)]
@@ -112,6 +123,7 @@ impl D1Command {
                 file,
                 json,
             } => cmd_execute(backend, &name, command, file, json).await,
+            Self::Restore { name } => cmd_restore(backend, &name).await,
             Self::Migrations { command } => match command {
                 MigrationsCommand::Apply { name, dir } => cmd_apply(backend, &name, &dir).await,
                 MigrationsCommand::Status { name, dir } => cmd_status(backend, &name, &dir).await,
@@ -232,6 +244,24 @@ async fn cmd_execute<B: Backend>(
         ),
         _ => return Err(d1_error(&result)),
     }
+
+    Ok(())
+}
+
+async fn cmd_restore<B: Backend>(backend: &B, name: &str) -> Result<(), BackendError> {
+    let result = backend
+        .d1_request(name, json!({ "type": "restore" }))
+        .await?;
+
+    if result["type"] != "exec" {
+        return Err(d1_error(&result));
+    }
+
+    println!(
+        "{} D1 database '{}': its next call restores the last snapshot.",
+        "Reset".green(),
+        name.bold()
+    );
 
     Ok(())
 }
