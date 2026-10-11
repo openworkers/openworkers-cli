@@ -5,6 +5,7 @@ use super::{
     Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput, UploadResult,
     UploadWorkerInfo, Worker,
 };
+use super::{CreateD1Input, D1Database};
 use crate::config::PlatformStorageConfig;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -34,6 +35,19 @@ struct RoutesConfig {
 struct FunctionRoute {
     pattern: String,
     worker: String,
+}
+
+/// How long `d1_request` waits for the runner
+const D1_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn d1_from_row(row: &sqlx::postgres::PgRow) -> D1Database {
+    D1Database {
+        id: row.get::<uuid::Uuid, _>("id").to_string(),
+        name: row.get("name"),
+        description: row.get("desc"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
 }
 
 pub struct DbBackend {
@@ -1068,6 +1082,128 @@ impl Backend for DbBackend {
         }
 
         Ok(())
+    }
+
+    // D1 methods
+    async fn list_d1(&self) -> Result<Vec<D1Database>, BackendError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, "desc", created_at, updated_at
+            FROM d1_databases
+            WHERE user_id = $1 AND deleted_at IS NULL
+            ORDER BY name
+            "#,
+        )
+        .bind(self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(d1_from_row).collect())
+    }
+
+    async fn get_d1(&self, name: &str) -> Result<D1Database, BackendError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, "desc", created_at, updated_at
+            FROM d1_databases
+            WHERE name = $1 AND user_id = $2 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(name)
+        .bind(self.user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| BackendError::NotFound(format!("D1 database '{}' not found", name)))?;
+
+        Ok(d1_from_row(&row))
+    }
+
+    async fn create_d1(&self, input: CreateD1Input) -> Result<D1Database, BackendError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO d1_databases (name, "desc", user_id)
+            VALUES ($1, $2, $3)
+            RETURNING id, name, "desc", created_at, updated_at
+            "#,
+        )
+        .bind(&input.name)
+        .bind(&input.desc)
+        .bind(self.user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(d1_from_row(&row))
+    }
+
+    async fn delete_d1(&self, name: &str) -> Result<(), BackendError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE d1_databases SET deleted_at = now()
+            WHERE name = $1 AND user_id = $2 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(name)
+        .bind(self.user_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(BackendError::NotFound(format!(
+                "D1 database '{}' not found",
+                name
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn d1_request(
+        &self,
+        name: &str,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, BackendError> {
+        let database = self.get_d1(name).await?;
+
+        // Listen before the insert, or the result can arrive first
+        let mut listener = sqlx::postgres::PgListener::connect_with(&self.pool).await?;
+
+        listener.listen("d1_result").await?;
+
+        let id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO d1_requests (database_id, request) VALUES ($1::uuid, $2) RETURNING id",
+        )
+        .bind(&database.id)
+        .bind(&request)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let wait = async {
+            loop {
+                let notification = listener.recv().await?;
+
+                if notification.payload() == id.to_string() {
+                    return Ok::<_, sqlx::Error>(());
+                }
+            }
+        };
+
+        let waited = tokio::time::timeout(D1_REQUEST_TIMEOUT, wait).await;
+
+        let result: Option<serde_json::Value> =
+            sqlx::query_scalar("DELETE FROM d1_requests WHERE id = $1 RETURNING result")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+
+        match (waited, result) {
+            (_, Some(result)) => Ok(result),
+            (Ok(Err(err)), None) => Err(err.into()),
+            _ => Err(BackendError::Api(format!(
+                "no runner answered within {} seconds; is D1 enabled on the runner?",
+                D1_REQUEST_TIMEOUT.as_secs()
+            ))),
+        }
     }
 
     // Database methods

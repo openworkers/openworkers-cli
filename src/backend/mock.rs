@@ -4,6 +4,7 @@ use super::{
     Environment, KvNamespace, Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
     UploadResult, UploadWorkerInfo, Worker,
 };
+use super::{CreateD1Input, D1Database};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -362,6 +363,46 @@ impl Backend for MockBackend {
     async fn delete_kv(&self, name: &str) -> Result<(), BackendError> {
         Err(BackendError::NotFound(format!(
             "KV namespace '{}' not found",
+            name
+        )))
+    }
+
+    // D1 methods (basic mock implementations)
+    async fn list_d1(&self) -> Result<Vec<D1Database>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn get_d1(&self, name: &str) -> Result<D1Database, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "D1 database '{}' not found",
+            name
+        )))
+    }
+
+    async fn create_d1(&self, input: CreateD1Input) -> Result<D1Database, BackendError> {
+        Ok(D1Database {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name,
+            description: input.desc,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn delete_d1(&self, name: &str) -> Result<(), BackendError> {
+        Err(BackendError::NotFound(format!(
+            "D1 database '{}' not found",
+            name
+        )))
+    }
+
+    async fn d1_request(
+        &self,
+        name: &str,
+        _request: serde_json::Value,
+    ) -> Result<serde_json::Value, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "D1 database '{}' not found",
             name
         )))
     }

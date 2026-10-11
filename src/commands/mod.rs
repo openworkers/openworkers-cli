@@ -1,4 +1,5 @@
 pub mod alias;
+pub mod d1;
 pub mod databases;
 pub mod env;
 pub mod kv;

@@ -261,6 +261,26 @@ pub struct CreateKvInput {
     pub desc: Option<String>,
 }
 
+// D1 types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct D1Database {
+    pub id: String,
+    pub name: String,
+    #[serde(alias = "desc")]
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateD1Input {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+}
+
 // Database types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type, clap::ValueEnum)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -435,6 +455,34 @@ pub trait Backend: Send + Sync {
         &self,
         name: &str,
     ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
+
+    // D1 methods
+    fn list_d1(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<D1Database>, BackendError>> + Send;
+
+    fn get_d1(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<D1Database, BackendError>> + Send;
+
+    fn create_d1(
+        &self,
+        input: CreateD1Input,
+    ) -> impl std::future::Future<Output = Result<D1Database, BackendError>> + Send;
+
+    fn delete_d1(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
+
+    /// Runs a management request on the runner that owns the database and
+    /// returns its result. Both are JSON: see the runner's `d1::requests`.
+    fn d1_request(
+        &self,
+        name: &str,
+        request: serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<serde_json::Value, BackendError>> + Send;
 
     // Database methods
     fn list_databases(

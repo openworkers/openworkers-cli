@@ -4,6 +4,7 @@ use super::{
     Environment, KvNamespace, Project, StorageConfig, UpdateEnvironmentInput, UpdateWorkerInput,
     UploadResult, Worker,
 };
+use super::{CreateD1Input, D1Database};
 use crate::config::DEFAULT_API_URL;
 use reqwest::Client;
 
@@ -11,6 +12,26 @@ pub struct ApiBackend {
     client: Client,
     base_url: String,
     token: Option<String>,
+}
+
+/// The body of a `/d1` response, or the error its status means
+async fn d1_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    name: &str,
+) -> Result<T, BackendError> {
+    match response.status() {
+        reqwest::StatusCode::NOT_FOUND => Err(BackendError::NotFound(format!(
+            "D1 database '{}' not found",
+            name
+        ))),
+        reqwest::StatusCode::UNAUTHORIZED => Err(BackendError::Unauthorized),
+        reqwest::StatusCode::NO_CONTENT => serde_json::from_value(serde_json::Value::Null)
+            .map_err(|e| BackendError::Api(e.to_string())),
+        status if !status.is_success() => {
+            Err(BackendError::Api(response.text().await.unwrap_or_default()))
+        }
+        _ => Ok(response.json().await?),
+    }
 }
 
 impl ApiBackend {
@@ -606,6 +627,57 @@ impl Backend for ApiBackend {
         }
 
         Ok(())
+    }
+
+    // D1 methods
+    async fn list_d1(&self) -> Result<Vec<D1Database>, BackendError> {
+        let response = self.request(reqwest::Method::GET, "/d1").send().await?;
+
+        d1_response(response, "").await
+    }
+
+    async fn get_d1(&self, name: &str) -> Result<D1Database, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/d1/{}", name))
+            .send()
+            .await?;
+
+        d1_response(response, name).await
+    }
+
+    async fn create_d1(&self, input: CreateD1Input) -> Result<D1Database, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/d1")
+            .json(&input)
+            .send()
+            .await?;
+
+        d1_response(response, "").await
+    }
+
+    async fn delete_d1(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/d1/{}", name))
+            .send()
+            .await?;
+
+        d1_response::<serde_json::Value>(response, name)
+            .await
+            .map(|_| ())
+    }
+
+    async fn d1_request(
+        &self,
+        name: &str,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, &format!("/d1/{}/requests", name))
+            .json(&request)
+            .send()
+            .await?;
+
+        d1_response(response, name).await
     }
 
     // Database methods

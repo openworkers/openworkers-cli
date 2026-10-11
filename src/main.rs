@@ -11,6 +11,7 @@ use backend::BackendError;
 use backend::api::ApiBackend;
 use backend::db::DbBackend;
 use commands::alias::AliasCommand;
+use commands::d1::D1Command;
 use commands::databases::DatabasesCommand;
 use commands::env::EnvCommand;
 use commands::kv::KvCommand;
@@ -200,6 +201,16 @@ enum Commands {
         command: DatabasesCommand,
     },
 
+    /// Manage D1 databases (SQLite in the runner)
+    #[command(after_help = "Examples:\n  \
+        ow d1 create guestbook                 Create a D1 database\n  \
+        ow d1 execute guestbook -c \"SELECT 1\" Run one statement\n  \
+        ow d1 migrations apply guestbook       Apply ./migrations/*.sql")]
+    D1 {
+        #[command(subcommand)]
+        command: D1Command,
+    },
+
     /// Configure platform storage for asset uploads (one-time setup for DB aliases)
     #[command(after_help = "Example:\n  \
         ow local setup-storage \\\n    \
@@ -294,6 +305,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "storage",
         "kv",
         "databases",
+        "d1",
         "setup-storage",
         "test-latency",
         "mcp",
@@ -334,6 +346,7 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "storage",
         "kv",
         "databases",
+        "d1",
         "setup-storage",
         "test-latency",
         // Short aliases
@@ -547,6 +560,37 @@ async fn run_kv_command(alias: Option<String>, command: KvCommand) -> Result<(),
     }
 }
 
+async fn run_d1_command(alias: Option<String>, command: D1Command) -> Result<(), String> {
+    let alias_config = resolve_alias(alias)?;
+
+    match alias_config {
+        AliasConfig::Db {
+            database_url, user, ..
+        } => {
+            // A management request listens on one connection and inserts on another
+            let pool = PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&database_url)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let backend = DbBackend::new(pool, user, None)
+                .await
+                .map_err(format_backend_error)?;
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+
+        AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } => {
+            let backend = ApiBackend::new(url, token, insecure);
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+    }
+}
+
 async fn run_databases_command(
     alias: Option<String>,
     command: DatabasesCommand,
@@ -670,6 +714,7 @@ async fn main() {
         Commands::Storage { command } => run_storage_command(alias, command).await,
         Commands::Kv { command } => run_kv_command(alias, command).await,
         Commands::Databases { command } => run_databases_command(alias, command).await,
+        Commands::D1 { command } => run_d1_command(alias, command).await,
         Commands::TestLatency {
             connect,
             count,

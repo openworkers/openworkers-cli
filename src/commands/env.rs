@@ -68,10 +68,11 @@ pub enum EnvCommand {
         key: String,
     },
 
-    /// Bind a resource (KV, database, storage) to an environment
+    /// Bind a resource (KV, database, D1, storage) to an environment
     #[command(after_help = "Examples:\n  \
         ow env bind prod KV my-cache --type kv\n  \
         ow env bind prod DB my-database --type database\n  \
+        ow env bind prod SQL guestbook --type d1\n  \
         ow env bind prod ASSETS my-storage --type assets\n  \
         ow env bind prod FILES my-storage --type storage")]
     Bind {
@@ -84,8 +85,8 @@ pub enum EnvCommand {
         /// Resource name to bind (must exist)
         resource: String,
 
-        /// Binding type: assets, storage, kv, or database
-        #[arg(short = 't', long = "type", value_parser = ["assets", "storage", "kv", "database"])]
+        /// Binding type: assets, storage, kv, database, or d1
+        #[arg(short = 't', long = "type", value_parser = ["assets", "storage", "kv", "database", "d1"])]
         binding_type: String,
     },
 }
@@ -221,6 +222,7 @@ async fn cmd_get<B: Backend>(backend: &B, name: &str) -> Result<(), BackendError
                 "assets" => "[assets]".green(),
                 "storage" => "[storage]".blue(),
                 "database" => "[database]".magenta(),
+                "d1" => "[d1]".magenta(),
                 _ => format!("[{}]", val.value_type).dimmed(),
             };
 
@@ -372,6 +374,10 @@ async fn cmd_bind<B: Backend>(
         "database" => {
             let db = backend.get_database(resource).await?;
             db.id
+        }
+        "d1" => {
+            let d1 = backend.get_d1(resource).await?;
+            d1.id
         }
         _ => {
             return Err(BackendError::Api(format!(
