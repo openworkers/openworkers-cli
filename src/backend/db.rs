@@ -6,6 +6,7 @@ use super::{
     UploadWorkerInfo, Worker,
 };
 use super::{CreateD1Input, D1Database};
+use super::{CreateDurableObjectInput, DurableObjectNamespace};
 use crate::config::PlatformStorageConfig;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -45,6 +46,27 @@ fn d1_from_row(row: &sqlx::postgres::PgRow) -> D1Database {
         id: row.get::<uuid::Uuid, _>("id").to_string(),
         name: row.get("name"),
         description: row.get("desc"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+/// The columns of a namespace with the name of its worker
+const NAMESPACE_COLUMNS: &str = r#"
+    N.id, N.name, N."desc", N.worker_id, W.name AS worker_name, N.class_name,
+    N.created_at, N.updated_at
+"#;
+
+fn namespace_from_row(row: &sqlx::postgres::PgRow) -> DurableObjectNamespace {
+    DurableObjectNamespace {
+        id: row.get::<uuid::Uuid, _>("id").to_string(),
+        name: row.get("name"),
+        description: row.get("desc"),
+        worker_id: row
+            .get::<Option<uuid::Uuid>, _>("worker_id")
+            .map(|id| id.to_string()),
+        worker_name: row.get("worker_name"),
+        class_name: row.get("class_name"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
@@ -1157,6 +1179,101 @@ impl Backend for DbBackend {
         Ok(())
     }
 
+    // Durable Object methods
+    async fn list_durable_objects(&self) -> Result<Vec<DurableObjectNamespace>, BackendError> {
+        let sql = format!(
+            "SELECT {NAMESPACE_COLUMNS} FROM durable_object_namespaces AS N \
+             LEFT JOIN workers AS W ON W.id = N.worker_id \
+             WHERE N.user_id = $1 AND N.deleted_at IS NULL ORDER BY N.name"
+        );
+
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(self.user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows.iter().map(namespace_from_row).collect())
+    }
+
+    async fn get_durable_object(&self, name: &str) -> Result<DurableObjectNamespace, BackendError> {
+        let sql = format!(
+            "SELECT {NAMESPACE_COLUMNS} FROM durable_object_namespaces AS N \
+             LEFT JOIN workers AS W ON W.id = N.worker_id \
+             WHERE N.name = $1 AND N.user_id = $2 AND N.deleted_at IS NULL"
+        );
+
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(name)
+            .bind(self.user_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| {
+                BackendError::NotFound(format!("Durable Object namespace '{}' not found", name))
+            })?;
+
+        Ok(namespace_from_row(&row))
+    }
+
+    async fn create_durable_object(
+        &self,
+        input: CreateDurableObjectInput,
+    ) -> Result<DurableObjectNamespace, BackendError> {
+        // The worker must be of this account, or the namespace would run the
+        // code of another account
+        let worker: uuid::Uuid = sqlx::query_scalar(
+            "SELECT id FROM workers WHERE (name = $1 OR id::text = $1) AND user_id = $2",
+        )
+        .bind(&input.worker)
+        .bind(self.user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| BackendError::NotFound(format!("Worker '{}' not found", input.worker)))?;
+
+        let id: uuid::Uuid = sqlx::query_scalar(
+            r#"
+            INSERT INTO durable_object_namespaces (name, "desc", user_id, worker_id, class_name)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            "#,
+        )
+        .bind(&input.name)
+        .bind(&input.desc)
+        .bind(self.user_id)
+        .bind(worker)
+        .bind(&input.class_name)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let namespaces = self.list_durable_objects().await?;
+
+        namespaces
+            .into_iter()
+            .find(|namespace| namespace.id == id.to_string())
+            .ok_or_else(|| BackendError::Api("the new namespace is gone".to_string()))
+    }
+
+    async fn delete_durable_object(&self, name: &str) -> Result<(), BackendError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE durable_object_namespaces SET deleted_at = now()
+            WHERE name = $1 AND user_id = $2 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(name)
+        .bind(self.user_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(BackendError::NotFound(format!(
+                "Durable Object namespace '{}' not found",
+                name
+            )));
+        }
+
+        Ok(())
+    }
+
     async fn d1_request(
         &self,
         name: &str,
@@ -1379,6 +1496,83 @@ mod tests {
             .await
             .unwrap()
             .flatten()
+    }
+
+    /// A worker of `user`, made directly in the database
+    async fn new_worker(backend: &DbBackend, user: uuid::Uuid) -> String {
+        let name = format!("cli-test-{}", uuid::Uuid::new_v4().simple());
+
+        sqlx::query("INSERT INTO workers (name, user_id) VALUES ($1, $2)")
+            .bind(&name)
+            .bind(user)
+            .execute(&backend.pool)
+            .await
+            .unwrap();
+
+        name
+    }
+
+    #[tokio::test]
+    #[ignore = "needs OW_TEST_DATABASE_URL and OW_TEST_USER"]
+    async fn a_namespace_takes_a_worker_of_its_account_only() {
+        let Some(backend) = backend().await else {
+            return;
+        };
+
+        let worker = new_worker(&backend, backend.user_id).await;
+        let name = format!("cli-test-{}", uuid::Uuid::new_v4().simple());
+        let input = |worker: &str| CreateDurableObjectInput {
+            name: name.clone(),
+            desc: Some("counts".to_string()),
+            worker: worker.to_string(),
+            class_name: "Counter".to_string(),
+        };
+
+        let created = backend.create_durable_object(input(&worker)).await.unwrap();
+        assert_eq!(created.worker_name.as_deref(), Some(worker.as_str()));
+        assert_eq!(created.class_name, "Counter");
+
+        let read = backend.get_durable_object(&name).await.unwrap();
+        assert_eq!(read.id, created.id);
+        assert!(
+            backend
+                .list_durable_objects()
+                .await
+                .unwrap()
+                .iter()
+                .any(|namespace| namespace.id == created.id)
+        );
+
+        // The worker of another account is not found
+        let stranger: uuid::Uuid =
+            sqlx::query_scalar("INSERT INTO users (username) VALUES ($1) RETURNING id")
+                .bind(format!("cli-test-{}", uuid::Uuid::new_v4().simple()))
+                .fetch_one(&backend.pool)
+                .await
+                .unwrap();
+        let theirs = new_worker(&backend, stranger).await;
+        let refused = backend.create_durable_object(input(&theirs)).await;
+        assert!(
+            matches!(refused, Err(BackendError::NotFound(_))),
+            "{refused:?}"
+        );
+
+        backend.delete_durable_object(&name).await.unwrap();
+        assert!(matches!(
+            backend.get_durable_object(&name).await,
+            Err(BackendError::NotFound(_))
+        ));
+
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(stranger)
+            .execute(&backend.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM workers WHERE name = $1")
+            .bind(&worker)
+            .execute(&backend.pool)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

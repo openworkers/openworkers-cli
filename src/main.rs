@@ -13,6 +13,7 @@ use backend::db::DbBackend;
 use commands::alias::AliasCommand;
 use commands::d1::D1Command;
 use commands::databases::DatabasesCommand;
+use commands::durable_objects::DurableObjectsCommand;
 use commands::env::EnvCommand;
 use commands::kv::KvCommand;
 use commands::migrate::MigrateCommand;
@@ -211,6 +212,19 @@ enum Commands {
         command: D1Command,
     },
 
+    /// Manage Durable Object namespaces
+    #[command(
+        name = "durable-objects",
+        alias = "do",
+        after_help = "Examples:\n  \
+        ow do create counters --worker my-app --class Counter\n  \
+        ow env bind prod COUNTER counters -t durable_object"
+    )]
+    DurableObjects {
+        #[command(subcommand)]
+        command: DurableObjectsCommand,
+    },
+
     /// Configure platform storage for asset uploads (one-time setup for DB aliases)
     #[command(after_help = "Example:\n  \
         ow local setup-storage \\\n    \
@@ -306,6 +320,8 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "kv",
         "databases",
         "d1",
+        "durable-objects",
+        "do",
         "setup-storage",
         "test-latency",
         "mcp",
@@ -347,6 +363,8 @@ fn extract_alias_from_args() -> (Option<String>, Vec<String>) {
         "kv",
         "databases",
         "d1",
+        "durable-objects",
+        "do",
         "setup-storage",
         "test-latency",
         // Short aliases
@@ -560,6 +578,39 @@ async fn run_kv_command(alias: Option<String>, command: KvCommand) -> Result<(),
     }
 }
 
+async fn run_durable_objects_command(
+    alias: Option<String>,
+    command: DurableObjectsCommand,
+) -> Result<(), String> {
+    let alias_config = resolve_alias(alias)?;
+
+    match alias_config {
+        AliasConfig::Db {
+            database_url, user, ..
+        } => {
+            let pool = PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let backend = DbBackend::new(pool, user, None)
+                .await
+                .map_err(format_backend_error)?;
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+
+        AliasConfig::Api {
+            url,
+            token,
+            insecure,
+        } => {
+            let backend = ApiBackend::new(url, token, insecure);
+            command.run(&backend).await.map_err(format_backend_error)
+        }
+    }
+}
+
 async fn run_d1_command(alias: Option<String>, command: D1Command) -> Result<(), String> {
     let alias_config = resolve_alias(alias)?;
 
@@ -715,6 +766,7 @@ async fn main() {
         Commands::Kv { command } => run_kv_command(alias, command).await,
         Commands::Databases { command } => run_databases_command(alias, command).await,
         Commands::D1 { command } => run_d1_command(alias, command).await,
+        Commands::DurableObjects { command } => run_durable_objects_command(alias, command).await,
         Commands::TestLatency {
             connect,
             count,

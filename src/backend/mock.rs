@@ -5,6 +5,7 @@ use super::{
     UploadResult, UploadWorkerInfo, Worker,
 };
 use super::{CreateD1Input, D1Database};
+use super::{CreateDurableObjectInput, DurableObjectNamespace};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -392,6 +393,41 @@ impl Backend for MockBackend {
     async fn delete_d1(&self, name: &str) -> Result<(), BackendError> {
         Err(BackendError::NotFound(format!(
             "D1 database '{}' not found",
+            name
+        )))
+    }
+
+    // Durable Object methods (basic mock implementations)
+    async fn list_durable_objects(&self) -> Result<Vec<DurableObjectNamespace>, BackendError> {
+        Ok(vec![])
+    }
+
+    async fn get_durable_object(&self, name: &str) -> Result<DurableObjectNamespace, BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Durable Object namespace '{}' not found",
+            name
+        )))
+    }
+
+    async fn create_durable_object(
+        &self,
+        input: CreateDurableObjectInput,
+    ) -> Result<DurableObjectNamespace, BackendError> {
+        Ok(DurableObjectNamespace {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: input.name,
+            description: input.desc,
+            worker_id: None,
+            worker_name: Some(input.worker),
+            class_name: input.class_name,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn delete_durable_object(&self, name: &str) -> Result<(), BackendError> {
+        Err(BackendError::NotFound(format!(
+            "Durable Object namespace '{}' not found",
             name
         )))
     }

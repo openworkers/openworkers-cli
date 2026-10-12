@@ -281,6 +281,33 @@ pub struct CreateD1Input {
     pub desc: Option<String>,
 }
 
+// Durable Object types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DurableObjectNamespace {
+    pub id: String,
+    pub name: String,
+    #[serde(alias = "desc")]
+    pub description: Option<String>,
+    /// The worker that exports the class; None once that worker is deleted
+    pub worker_id: Option<String>,
+    pub worker_name: Option<String>,
+    pub class_name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDurableObjectInput {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+    /// Name or ID of a worker of the account
+    pub worker: String,
+    pub class_name: String,
+}
+
 // Database types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type, clap::ValueEnum)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -483,6 +510,26 @@ pub trait Backend: Send + Sync {
         name: &str,
         request: serde_json::Value,
     ) -> impl std::future::Future<Output = Result<serde_json::Value, BackendError>> + Send;
+
+    // Durable Object methods
+    fn list_durable_objects(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<DurableObjectNamespace>, BackendError>> + Send;
+
+    fn get_durable_object(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<DurableObjectNamespace, BackendError>> + Send;
+
+    fn create_durable_object(
+        &self,
+        input: CreateDurableObjectInput,
+    ) -> impl std::future::Future<Output = Result<DurableObjectNamespace, BackendError>> + Send;
+
+    fn delete_durable_object(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
 
     // Database methods
     fn list_databases(

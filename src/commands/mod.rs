@@ -1,6 +1,7 @@
 pub mod alias;
 pub mod d1;
 pub mod databases;
+pub mod durable_objects;
 pub mod env;
 pub mod kv;
 pub mod latency;

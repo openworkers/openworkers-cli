@@ -5,6 +5,7 @@ use super::{
     UploadResult, Worker,
 };
 use super::{CreateD1Input, D1Database};
+use super::{CreateDurableObjectInput, DurableObjectNamespace};
 use crate::config::DEFAULT_API_URL;
 use reqwest::Client;
 
@@ -22,6 +23,25 @@ async fn d1_response<T: serde::de::DeserializeOwned>(
     match response.status() {
         reqwest::StatusCode::NOT_FOUND => Err(BackendError::NotFound(format!(
             "D1 database '{}' not found",
+            name
+        ))),
+        reqwest::StatusCode::UNAUTHORIZED => Err(BackendError::Unauthorized),
+        reqwest::StatusCode::NO_CONTENT => serde_json::from_value(serde_json::Value::Null)
+            .map_err(|e| BackendError::Api(e.to_string())),
+        status if !status.is_success() => {
+            Err(BackendError::Api(response.text().await.unwrap_or_default()))
+        }
+        _ => Ok(response.json().await?),
+    }
+}
+
+async fn namespace_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    name: &str,
+) -> Result<T, BackendError> {
+    match response.status() {
+        reqwest::StatusCode::NOT_FOUND => Err(BackendError::NotFound(format!(
+            "Durable Object namespace '{}' not found",
             name
         ))),
         reqwest::StatusCode::UNAUTHORIZED => Err(BackendError::Unauthorized),
@@ -662,6 +682,52 @@ impl Backend for ApiBackend {
             .await?;
 
         d1_response::<serde_json::Value>(response, name)
+            .await
+            .map(|_| ())
+    }
+
+    // Durable Object methods
+    async fn list_durable_objects(&self) -> Result<Vec<DurableObjectNamespace>, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, "/durable-objects")
+            .send()
+            .await?;
+
+        namespace_response(response, "").await
+    }
+
+    async fn get_durable_object(&self, name: &str) -> Result<DurableObjectNamespace, BackendError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/durable-objects/{}", name))
+            .send()
+            .await?;
+
+        namespace_response(response, name).await
+    }
+
+    async fn create_durable_object(
+        &self,
+        input: CreateDurableObjectInput,
+    ) -> Result<DurableObjectNamespace, BackendError> {
+        let response = self
+            .request(reqwest::Method::POST, "/durable-objects")
+            .json(&input)
+            .send()
+            .await?;
+
+        namespace_response(response, "").await
+    }
+
+    async fn delete_durable_object(&self, name: &str) -> Result<(), BackendError> {
+        let response = self
+            .request(
+                reqwest::Method::DELETE,
+                &format!("/durable-objects/{}", name),
+            )
+            .send()
+            .await?;
+
+        namespace_response::<serde_json::Value>(response, name)
             .await
             .map(|_| ())
     }
